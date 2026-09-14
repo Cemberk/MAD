@@ -140,7 +140,21 @@ cluster_check_model_path() {
         elif [ -z \"\$(ls -A \"\$_p\" 2>/dev/null)\" ]; then
             echo \"\$(hostname): - \$_p exists but is EMPTY\"
         else
-            echo \"\$(hostname): + Found \$_p\"
+            # Fingerprint the weights, do not just confirm a directory exists.
+            # This path can resolve to DIFFERENT models on different nodes: on this
+            # cluster Kimi-K3 is a real directory on some nodes and a symlink to
+            # Kimi-K3-MXFP4 on others. Every rank loads from one MODEL_PATH, so a
+            # split allocation would run two quantizations in one job and produce
+            # wrong numbers rather than an error.
+            #
+            # config.json is the discriminator: it is small, always present in a
+            # HuggingFace layout, and carries quantization_config, so variants of
+            # one model differ in it. readlink is reported too, purely so the
+            # message can say WHY they differ.
+            _fp=nocfg
+            [ -f \"\$_p/config.json\" ] && _fp=\"\$(md5sum \"\$_p/config.json\" 2>/dev/null | cut -c1-12)\"
+            _rl=\"\$(readlink -f \"\$_p\" 2>/dev/null || echo \"\$_p\")\"
+            echo \"\$(hostname): + Found \$_p fp=\$_fp real=\$_rl\"
         fi
         exit 0
     " 2>/dev/null)"
@@ -155,6 +169,20 @@ cluster_check_model_path() {
     fi
     n_found="$(printf '%s\n' "${out}" | grep -c 'Found')"
     if [ "${n_found}" -eq "${nodes}" ]; then
+        # Present everywhere is not sufficient: it must be the SAME weights
+        # everywhere. Differing fingerprints reject this candidate rather than
+        # failing the run, so the walk falls through to shared NFS -- one copy
+        # every node reads, therefore uniform by construction. Slower, correct.
+        local n_fp
+        n_fp="$(printf '%s\n' "${out}" | grep -o 'fp=[^ ]*' | sort -u | grep -vc '^fp=nocfg$')"
+        if [ "${n_fp:-0}" -gt 1 ] 2>/dev/null; then
+            echo "x ${label} holds DIFFERENT weights on different nodes:"
+            printf '%s\n' "${out}" | sed 's/^/      /'
+            echo "  Every rank loads one MODEL_PATH, so this would run two variants in"
+            echo "  one job and report numbers rather than an error. Rejecting this"
+            echo "  candidate; falling through to the next."
+            return 1
+        fi
         echo "+ ${label} available on ALL nodes"
         return 0
     fi

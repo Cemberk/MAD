@@ -325,6 +325,14 @@ docker run --rm \
     -e MASTER_PORT=$MASTER_PORT \
     -e IPADDRS=$IPADDRS \
     -e MODEL_NAME=$MODEL_NAME \
+    # Provenance for the perf CSV. Both parse_to_csv.py implementations already
+    # read these two names (_get_run_metadata -> docker_image, machine_name), but
+    # they run INSIDE the container, so a name the -e list omits is simply absent
+    # and the column comes out blank. scripts/sglang_disagg passes both and its
+    # rows carry the image tag and nodelist; this launcher passed neither, which
+    # is why a green colocated run still published rows with no provenance.
+    -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
+    -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
     -e MODEL_PATH=$MODEL_PATH \
     -e SERVE_PORT=$SERVE_PORT \
     -e GPUS_PER_NODE=$GPUS_PER_NODE \

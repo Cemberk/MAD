@@ -588,6 +588,10 @@ docker run --rm \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
+    # Same reason as the nodelist above: parse_to_csv.py reads this for the
+    # docker_image column and runs inside the container, so without it the column
+    # is blank on every row this launcher produces.
+    -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e NNODES=$NNODES \
     -e NODE_RANK=$SLURM_PROCID \
     -e MASTER_ADDR=$MASTER_ADDR \
