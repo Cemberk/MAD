@@ -500,7 +500,18 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_KEY="${_IMG_KEY:-noimg}";
     _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
-    cluster_mark_dir "$_JIT_CACHE_HOST" "JIT/Triton/AITER kernel cache for one docker image; rebuilt on demand"
+    # Inline, not cluster_mark_dir: this runs in the srun body, a separate shell on
+    # the compute node where cluster.sh was never sourced, so the function is not
+    # defined here and would fail with "command not found" once per node.
+    if [ ! -e "$_JIT_CACHE_HOST/README.ci" ]; then
+        printf "Signature: 8a477f597d28d172789f06886806bc55\n# Cache directory created by MAD CI.\n" \
+            > "$_JIT_CACHE_HOST/CACHEDIR.TAG" 2>/dev/null || true
+        printf "%s\n%s\n\n%s\n" \
+            "What: JIT/Triton/AITER kernel cache for one docker image" \
+            "Written by: MAD CI disagg launcher" \
+            "Safe to delete when no job is running; it is rebuilt on demand." \
+            > "$_JIT_CACHE_HOST/README.ci" 2>/dev/null || true
+    fi
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
 else

@@ -205,6 +205,23 @@ docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true
 # survivors stuck forever at the socket barrier waiting for a peer that never came.
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
+# The SONAMEs first, then the versioned files they point at. Both are required and
+# the order does not matter, but omitting this loop is silently broken:
+# libibverbs.so.1 is the name every consumer links against, and it is a symlink.
+# Mounting only the versioned file (libibverbs.so.1.14.x) lands the host copy at a
+# path the image symlink does not point to, so libibverbs.so.1 still resolves to
+# the image version while libmlx5.so.1 -- matched by the pattern loop below and
+# therefore the HOST copy -- demands a symbol only the host libibverbs exports:
+#     OSError: libibverbs.so.1: version `IBVERBS_PRIVATE_57` not found
+#             (required by libmlx5.so.1)
+# vLLM loads its plugins during startup, so this kills the server about ten
+# seconds in, with a Python traceback that names a quantization plugin and not the
+# mount that caused it.
+# scripts/vllm_dissag/run_xPyD_models.slurm has always had this loop; this
+# launcher was written without it.
+for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
+    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+done
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
     [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
@@ -253,7 +270,19 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_KEY="${_IMG_KEY:-noimg}"
     _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
-    cluster_mark_dir "$_JIT_CACHE_HOST" "JIT/Triton/AITER kernel cache for one docker image; rebuilt on demand"
+    # Inline, not cluster_mark_dir: this runs in the srun body, a separate shell on
+    # the compute node where cluster.sh was never sourced, so the function is not
+    # defined here -- it fails with "command not found" once per node. Same reason
+    # the NVMe mount a few lines down is inlined.
+    if [ ! -e "$_JIT_CACHE_HOST/README.ci" ]; then
+        printf "Signature: 8a477f597d28d172789f06886806bc55\n# Cache directory created by MAD CI.\n" \
+            > "$_JIT_CACHE_HOST/CACHEDIR.TAG" 2>/dev/null || true
+        printf "%s\n%s\n\n%s\n" \
+            "What: JIT/Triton/AITER kernel cache for one docker image" \
+            "Written by: MAD CI colocated launcher" \
+            "Safe to delete when no job is running; it is rebuilt on demand." \
+            > "$_JIT_CACHE_HOST/README.ci" 2>/dev/null || true
+    fi
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache"
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache"
 else
