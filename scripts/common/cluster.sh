@@ -50,6 +50,23 @@ export MODEL_NAME="${MODEL_NAME:-None}"
 export MODEL_DIR="${MODEL_DIR:-}"
 export MODEL_PATH="${MODEL_PATH:-}"
 
+# Whether shared NFS is an acceptable place to load these weights from.
+#
+# For most models it is: a 63 GB checkpoint is served from page cache and the
+# difference does not show. For the very large ones it is not. A checkpoint too
+# big to cache is read at NFS speed by every node at once, and at that size the
+# read alone can outlast the time limit the partition allows -- so falling back
+# to NFS does not degrade the run, it produces a job that cannot finish.
+#
+# Cards for those models set REQUIRE_LOCAL_WEIGHTS=1. Local NVMe then becomes the
+# only candidate, and a node missing it -- or holding a different variant -- is a
+# hard failure that says what to fix, rather than a silent hour-long fallback.
+#
+# Left at 0 by default: it is a property of the MODEL, not of the site, and the
+# cards that need it declare it. Smaller models keep the NFS fallback that has
+# always worked for them.
+export REQUIRE_LOCAL_WEIGHTS="${REQUIRE_LOCAL_WEIGHTS:-0}"
+
 # --------------------------------------------------------------- paths
 export LOG_PATH="${LOG_PATH:-${SHARED_MOUNT}/${USER:-$(id -un)}/model_blog_logs}"
 
@@ -203,6 +220,21 @@ cluster_resolve_model_path() {
     fi
 
     local candidates="${MODEL_DIR_CANDIDATES}"
+    # NVMe only: drop every candidate under the shared mount. Done by filtering
+    # rather than by hardcoding one path, so an overridden MODEL_DIR_CANDIDATES
+    # with several local roots still works.
+    if [ "${REQUIRE_LOCAL_WEIGHTS}" = "1" ]; then
+        local _keep="" _c
+        for _c in ${candidates}; do
+            case "${_c}" in
+                "${SHARED_MOUNT%/}"/*) : ;;
+                *) _keep="${_keep} ${_c}" ;;
+            esac
+        done
+        candidates="${_keep# }"
+        echo "REQUIRE_LOCAL_WEIGHTS=1: ${MODEL_NAME} is too large to load over shared"
+        echo "storage in the time this partition allows; considering local roots only."
+    fi
     # Append an explicit MODEL_DIR unless the list already covers it.
     if [ -n "${MODEL_DIR:-}" ]; then
         case " ${candidates} " in
@@ -224,12 +256,23 @@ cluster_resolve_model_path() {
     done
 
     echo ""
-    echo "x FATAL: model '${MODEL_NAME}' is not on ALL allocated nodes in any of:"
+    echo "x FATAL: model '${MODEL_NAME}' is not usable on ALL allocated nodes in any of:"
     for dir in ${candidates}; do
         echo "  - ${dir%/}/${MODEL_NAME}"
     done
     echo ""
-    echo "Every rank loads from the same path, so it must exist on every node."
+    echo "Every rank loads from the same path, so it must exist, be non-empty, and be"
+    echo "the SAME weights on every node."
+    if [ "${REQUIRE_LOCAL_WEIGHTS}" = "1" ]; then
+        echo ""
+        echo "This card sets REQUIRE_LOCAL_WEIGHTS=1, so shared storage was deliberately"
+        echo "not considered: at this model's size an NFS read would not finish inside the"
+        echo "partition time limit. Failing now rather than burning the allocation."
+        echo ""
+        echo "To fix: stage ${MODEL_NAME} on local NVMe on the nodes this job can draw,"
+        echo "with the path resolving to the same weights on each. The per-node lines"
+        echo "above say which nodes are missing it and which hold a different variant."
+    fi
     return 1
 }
 
