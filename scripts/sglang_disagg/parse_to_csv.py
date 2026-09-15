@@ -64,7 +64,13 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
 
         # Config emitted by benchmark_xPyD.sh: "RUNNING: prompts  isl X osl Y con Z"
         config_match = re.search(
-            r"RUNNING: prompts\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)", prev_section
+            # The prompt count between "prompts" and "isl" is OPTIONAL. This
+            # branch's benchmark_xPyD.sh emits none, so the two spaces are
+            # empty; other branches and archived logs print the per-cell count
+            # there. Accepting both means a rerun over any collected log yields
+            # rows instead of an empty CSV, and costs nothing when it is absent.
+            r"RUNNING: prompts\s+(?:\d+\s+)?isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)",
+            prev_section,
         )
         if config_match:
             current_isl = int(config_match.group(1))
