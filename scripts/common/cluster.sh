@@ -99,12 +99,69 @@ export TP_SIZE="${TP_SIZE:-${GPUS_PER_NODE}}"
 export PP_SIZE="${PP_SIZE:-1}"
 
 # --------------------------------------------------------------- fabric
+# The values below were one cluster's, hardcoded. They are not portable: the
+# RDMA driver, the GID index and the control-plane interface all change with the
+# adapter vendor, and getting one wrong does not fail loudly -- RCCL initializes
+# zero NICs and falls back to TCP, so the run still completes and still reports a
+# number, measured over the wrong transport.
+#
+# CLUSTER_ARCHETYPE names the fabric family. It is DETECTED from the adapters
+# present, because the node knows and a human guessing does not. Set it
+# explicitly to override, or set any individual variable below -- everything here
+# is ${VAR:-default}, so an explicit value always wins over the archetype.
+#
+#   cx7      Mellanox CX7 / RoCE          mlx5_*      GID 3   iface eth0
+#   ainic    AMD AINIC / Pollara          rdma0..7    GID 1   iface eno0
+#   thor2    Broadcom Thor2 / RoCE        bnxt_re0..7 GID 3   iface fenic0
+#
+# Archetype facts and the confirm-on-node procedure:
+# .claude/skills/mad-slurm-multinode/references/cluster-types.md
+cluster_detect_archetype() {
+    local devs=""
+    if [ -d /sys/class/infiniband ]; then
+        devs="$(ls /sys/class/infiniband 2>/dev/null)"
+    elif command -v ibv_devices >/dev/null 2>&1; then
+        devs="$(ibv_devices 2>/dev/null | awk 'NR>2 {print $1}')"
+    fi
+    case "${devs}" in
+        *bnxt_re*) echo thor2 ;;
+        *rdma*)    echo ainic ;;
+        *mlx5*)    echo cx7 ;;
+        *)         echo unknown ;;
+    esac
+}
+
+export CLUSTER_ARCHETYPE="${CLUSTER_ARCHETYPE:-$(cluster_detect_archetype)}"
+
+case "${CLUSTER_ARCHETYPE}" in
+    ainic)
+        _arch_gid=1;  _arch_iface=eno0;   _arch_drivers=ionic;   _arch_kv_nic=rdma0
+        # Without this the AINIC path falls back to verbs/sockets silently.
+        export RCCL_AINIC_ROCE="${RCCL_AINIC_ROCE:-1}"
+        ;;
+    thor2)
+        _arch_gid=3;  _arch_iface=fenic0; _arch_drivers=bnxt_re; _arch_kv_nic=bnxt_re0
+        ;;
+    *)
+        # cx7 and unknown share these: the previous hardcoded values, so a node
+        # this cannot classify behaves exactly as before rather than differently.
+        _arch_gid=3;  _arch_iface=eth0;   _arch_drivers=mlx5;    _arch_kv_nic=mlx5_1
+        ;;
+esac
+
+export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-${_arch_gid}}"
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${_arch_iface}}"
+export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${NCCL_SOCKET_IFNAME}}"
+export RDMAV_DRIVERS="${RDMAV_DRIVERS:-${_arch_drivers}}"
+export IBV_DRIVERS="${IBV_DRIVERS:-${_arch_drivers}}"
+
 # USE_CX7_NICS=1 selects the 8 CX7 rail NICs for KV transfer; 0 keeps KV on the
 # management NIC, which is cross-rail safe but is a fraction of the bandwidth and
 # only shows up as a bottleneck once the input sequence is long enough to move
-# real KV. Rail NICs require the allocated nodes to share a rail.
+# real KV. Rail NICs require the allocated nodes to share a rail. Meaningful on
+# cx7 only; the other archetypes name their KV device directly.
 export USE_CX7_NICS="${USE_CX7_NICS:-0}"
-export KV_IB_DEVICE="${KV_IB_DEVICE:-mlx5_1}"
+export KV_IB_DEVICE="${KV_IB_DEVICE:-${_arch_kv_nic}}"
 export FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
 
 # --------------------------------------------------------------- ports
