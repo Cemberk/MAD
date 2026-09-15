@@ -47,6 +47,13 @@ export NVME_ROOT="${NVME_ROOT:-/mnt/m2m_nobackup}"
 export SHARED_MOUNT="${SHARED_MOUNT:-/shared_inference}"
 export MODEL_DIR_CANDIDATES="${MODEL_DIR_CANDIDATES:-${NVME_ROOT}/models_blog ${SHARED_MOUNT}/models_blog}"
 export MODEL_NAME="${MODEL_NAME:-None}"
+# The directory the weights actually live in, which is not always MODEL_NAME.
+# A card can be a CONFIGURATION alias: Kimi-K2-Instruct-MoRI-AB and
+# Kimi-K2-Instruct-DeepEP-AB differ only in their all-to-all backend and share
+# one checkpoint, so the catalog key and the weights directory diverge. A
+# launcher that sets MODEL_WEIGHTS_NAME (see scripts/sglang_disagg) gets that
+# directory resolved; everything else keeps resolving MODEL_NAME as before.
+export MODEL_WEIGHTS_NAME="${MODEL_WEIGHTS_NAME:-${MODEL_NAME}}"
 export MODEL_DIR="${MODEL_DIR:-}"
 export MODEL_PATH="${MODEL_PATH:-}"
 
@@ -245,8 +252,8 @@ cluster_resolve_model_path() {
 
     local dir
     for dir in ${candidates}; do
-        if cluster_check_model_path "${dir%/}/${MODEL_NAME}" "${dir%/}"; then
-            MODEL_PATH="${dir%/}/${MODEL_NAME}"
+        if cluster_check_model_path "${dir%/}/${MODEL_WEIGHTS_NAME}" "${dir%/}"; then
+            MODEL_PATH="${dir%/}/${MODEL_WEIGHTS_NAME}"
             MODEL_DIR="${dir%/}"
             export MODEL_PATH MODEL_DIR
             echo ""
@@ -258,7 +265,7 @@ cluster_resolve_model_path() {
     echo ""
     echo "x FATAL: model '${MODEL_NAME}' is not usable on ALL allocated nodes in any of:"
     for dir in ${candidates}; do
-        echo "  - ${dir%/}/${MODEL_NAME}"
+        echo "  - ${dir%/}/${MODEL_WEIGHTS_NAME}"
     done
     echo ""
     echo "Every rank loads from the same path, so it must exist, be non-empty, and be"
