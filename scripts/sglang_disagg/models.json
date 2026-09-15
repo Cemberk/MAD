@@ -532,7 +532,21 @@
             "mori-a2a"
         ],
         "timeout": 14400,
-        "args": ""
+        "args": "",
+        "distributed": {
+            "launcher": "sglang-disagg",
+            "nnodes": 4,
+            "nproc_per_node": 8,
+            "sglang_disagg": {
+                "prefill_nodes": 2,
+                "decode_nodes": 2
+            }
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "02:30:00"
+        }
     },
     {
         "name": "sglang-disagg-gpt-oss-120b-overlay",
@@ -553,7 +567,21 @@
             "tp-only"
         ],
         "timeout": 14400,
-        "args": ""
+        "args": "",
+        "distributed": {
+            "launcher": "sglang-disagg",
+            "nnodes": 4,
+            "nproc_per_node": 8,
+            "sglang_disagg": {
+                "prefill_nodes": 2,
+                "decode_nodes": 2
+            }
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "02:30:00"
+        }
     },
     {
         "name": "sglang-disagg-kimi-k2-instruct-overlay",
@@ -576,7 +604,21 @@
             "mori-a2a"
         ],
         "timeout": 14400,
-        "args": ""
+        "args": "",
+        "distributed": {
+            "launcher": "sglang-disagg",
+            "nnodes": 4,
+            "nproc_per_node": 8,
+            "sglang_disagg": {
+                "prefill_nodes": 2,
+                "decode_nodes": 2
+            }
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "06:00:00"
+        }
     },
     {
         "name": "sglang-disagg-llama-4-scout-overlay",
@@ -597,7 +639,21 @@
             "tp-only"
         ],
         "timeout": 21600,
-        "args": ""
+        "args": "",
+        "distributed": {
+            "launcher": "sglang-disagg",
+            "nnodes": 4,
+            "nproc_per_node": 8,
+            "sglang_disagg": {
+                "prefill_nodes": 2,
+                "decode_nodes": 2
+            }
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "02:30:00"
+        }
     },
     {
         "name": "sglang-disagg-llama-3.1-70b-overlay",
@@ -717,7 +773,21 @@
             "RUN_MORI": "1",
             "SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD": "0"
         },
-        "args": ""
+        "args": "",
+        "distributed": {
+            "launcher": "sglang-disagg",
+            "nnodes": 4,
+            "nproc_per_node": 8,
+            "sglang_disagg": {
+                "prefill_nodes": 2,
+                "decode_nodes": 2
+            }
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "06:00:00"
+        }
     },
     {
         "name": "sglang-disagg-kimi-k2-instruct-deepep-ab",
@@ -748,6 +818,20 @@
             "RUN_MORI": "1",
             "SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD": "0"
         },
-        "args": ""
+        "args": "",
+        "distributed": {
+            "launcher": "sglang-disagg",
+            "nnodes": 4,
+            "nproc_per_node": 8,
+            "sglang_disagg": {
+                "prefill_nodes": 2,
+                "decode_nodes": 2
+            }
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "06:00:00"
+        }
     }
 ]
