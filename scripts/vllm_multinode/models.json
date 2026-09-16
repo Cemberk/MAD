@@ -41,6 +41,41 @@
         "args": ""
     },
     {
+        "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "inference",
+            "way4"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "mad-config.kimi-k3.yaml",
+            "BENCHMARK_SCRIPT": "niah"
+        },
+        "args": ""
+    },
+    {
         "name": "pyt_vllm_kimi-k3_mi300x_wideep_allgather",
         "url": "",
         "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
