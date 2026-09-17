@@ -184,6 +184,26 @@ export MAD_SCRIPTS_MOUNT=/mad_scripts
 export COLOCATED_FORWARD_ENV
 for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; done
 
+# Two rules for the srun body below, both learned the hard way, both invisible to
+# bash -n:
+#
+#   1. No apostrophes. The body is ONE single-quoted string. An apostrophe closes
+#      it, the text after escapes as shell words, and bash -c receives a truncated
+#      script. Build 56 died on the word cluster.sh<apostrophe>s. Build 72 died on a
+#      comment of mine that quoted an error message containing quoted words: the
+#      body ended mid-comment, docker run was never in it, and the job failed with
+#      no container output at all.
+#
+#   2. No comments inside a backslash continuation. The backslash splices the
+#      comment onto the command, ending it there; build 61 died that way, with
+#      docker run losing its image argument.
+#
+# Checked by scripts/common/check_continuations.py and the srun quote checker.
+#
+# On the -e list below: DOCKER_IMAGE_NAME and SLURM_JOB_NODELIST are provenance for
+# the perf CSV. Both parse_to_csv.py implementations read them (_get_run_metadata
+# for docker_image and machine_name) but run inside the container, so a name the
+# list omits is simply absent and the column comes out blank.
 srun --nodelist="$SELECTED_NODELIST" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)"
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true
@@ -303,19 +323,6 @@ for _v in ${COLOCATED_FORWARD_ENV//,/ }; do
 done
 echo "[fwd-env] forwarding: $(cut -d= -f1 "$_ENV_FILE" | tr "\n" " ")"
 
-# DOCKER_IMAGE_NAME and SLURM_JOB_NODELIST below are provenance for the perf CSV.
-# Both parse_to_csv.py implementations read them (_get_run_metadata -> docker_image,
-# machine_name) but run INSIDE the container, so a name the -e list omits is simply
-# absent and the column comes out blank. scripts/sglang_disagg passes both and its
-# rows carry the image tag and nodelist; this launcher passed neither, which is why
-# a green colocated run still published rows with no provenance.
-#
-# Keep every comment OUT of the docker run continuation below. A `#` line after a
-# trailing `\` is spliced onto the command, ends it at the comment, and leaves the
-# following `-e` lines to execute as commands -- which is exactly how build 61 died:
-#   docker: 'docker run' requires at least 1 argument
-#   /usr/bin/bash: line 148: -e: command not found
-# bash -n does not catch it; scripts/common/check_continuations.py does.
 docker run --rm \
     --device /dev/dri --device /dev/kfd --device /dev/infiniband \
     --network host --ipc host --group-add video \
