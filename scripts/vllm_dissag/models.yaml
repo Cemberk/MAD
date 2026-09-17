@@ -181,7 +181,7 @@ DeepSeek-R1:
 
 # Kimi-K3-MXFP4 (MI300X gfx942 wideEP disagg). Recipe knobs from
 # scripts/vllm/kimik3_mi300x/wideep_disagg_2p2d/; vLLM connector fixes live in the
-# disagg image (raviguptaamd/vllm @ kimi-k3-wideep-disagg-fullsource-v3).
+# disagg image (the PR#241-proven v4 build; the recipe's vLLM/MoRIIO connector fixes are folded into that image's vLLM source).
 _kimik3_recipe_env: &kimik3_recipe_env
   VLLM_USE_V1: "1"
   NCCL_DEBUG: "WARN"
@@ -190,8 +190,8 @@ _kimik3_recipe_env: &kimik3_recipe_env
   # management NICs (e.g. mlx5_1/mlx5_6). Required on images that do not bake NCCL_IB_HCA,
   # otherwise NCCL grabs the ethernet NICs and QP INIT->RTR times out. Adjust the rail
   # list below to match your fabric's RDMA devices.
-  NCCL_IB_HCA: "mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9"
-  MORI_RDMA_DEVICES: "mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9"
+  NCCL_IB_HCA: "mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8"
+  MORI_RDMA_DEVICES: "mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8"
   NCCL_IB_GID_INDEX: "3"
   NCCL_IB_DISABLE: "0"
   NCCL_SOCKET_IFNAME: "eth0"
@@ -213,14 +213,15 @@ _kimik3_recipe_env: &kimik3_recipe_env
   KV_BLOCK_SIZE: "16"
   KV_CACHE_DTYPE: "fp8"
   KV_CACHE_MEMORY_BYTES: "8000000000"
-  GPU_MEMORY_UTILIZATION: "0.80"
+  # 0.68 is the PR#241 (435641)-validated value on the con1fix v4 image; confirmed via /proc on
+  # the live 435862 run (12/12 NIAH 50K-280K). Higher util starves decode warmup activation.
+  GPU_MEMORY_UTILIZATION: "0.68"
   MAX_NUM_BATCHED_TOKENS: "2048"
   MAX_MODEL_LEN: "320000"
   PREFILL_CUDAGRAPH_MODE: "NONE"
-  # Decode: FULL_AND_PIECEWISE with capture sizes trimmed to [1,2,4] (matches the
-  # max_num_seqs=32 wave). Larger capture ranges OOM / abort at graph capture on this model.
+  # Decode: FULL_AND_PIECEWISE -- the PR#241 (435641)-validated launch captures decode cudagraphs
+  # on the con1fix v4 image (perf/number parity). Prefill stays NONE. Confirmed via /proc on 435862.
   DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
-  CUDAGRAPH_CAPTURE_SIZES: "1 2 4"
   VLLM_ALL2ALL_BACKEND: "mori_low_latency"
   PREFILL_MORI_BACKEND: "mori_high_throughput"
   DECODE_MORI_BACKEND: "mori_low_latency"
@@ -231,14 +232,15 @@ _kimik3_recipe_env: &kimik3_recipe_env
   # (KV blocks then leak on prefill -> stall). Lives in connectors/moriio.env, which the
   # interactive drive_cell.sh path does NOT source, so it must be in the recipe env to
   # propagate. Verified unset in the EngineCore process env on the failing run.
-  # NOTE: readback DISABLED. On images whose libmori BatchRead binding requires sequences,
-  # the scalar-arg read_remote_data() throws every request ("k3-readback failed ... continuing"),
-  # so the read-after-write fence never runs and decode reads stale remote HBM (garbage /
-  # non-deterministic recall). Use the sleep fence (K3_WRITE_FENCE) + device sync
-  # (K3_WRITE_DEVSYNC) instead, which do not touch the broken batch_read path.
-  K3_WRITE_READBACK: "0"
-  K3_WRITE_FENCE: "1"
-  K3_WRITE_DEVSYNC: "1"
+  # NOTE: readback RE-ENABLED on the v4 image. The v3-era libmori BatchRead binding bug
+  # (scalar-arg read_remote_data() threw "k3-readback failed ... continuing" every request,
+  # so the read-after-write fence never ran) is fixed in the v4 image; the deterministic RDMA
+  # read-after-write barrier now works and is the PR#241-proven path. The sleep fence
+  # (K3_WRITE_FENCE) + device sync (K3_WRITE_DEVSYNC) are therefore OFF (readback supersedes them).
+  K3_WRITE_READBACK: "1"
+  K3_WRITE_READBACK_BYTES: "8"
+  K3_WRITE_FENCE: "0"
+  K3_WRITE_DEVSYNC: "0"
   # --- PR241 parity additions ---
   # These vars previously lived only in connectors/moriio.env or moriio.sh defaults and did
   # not reach the container on the interactive drive_cell.sh path (moriio.env is only sourced
@@ -263,14 +265,14 @@ _kimik3_recipe_env: &kimik3_recipe_env
   MORI_IB_GID_INDEX: "3"
   # K3 gate knob:
   K3_CHUNK_GATE_SLACK: "2"
-  # Sleep-fence duration (used because K3_WRITE_FENCE=1 above; readback is broken in this image):
+  # Sleep-fence duration; INERT now that K3_WRITE_FENCE=0 (readback is the active path on v4). Kept for reference.
   K3_WRITE_FENCE_MS: "20"
 
 Kimi-K3-MXFP4:
   env: *kimik3_recipe_env
   prefill:
-    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy lazy --max-model-len 320000 --max-num-seqs 32'
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
 
   decode:
-    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy lazy --max-model-len 320000 --max-num-seqs 32'
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
 
