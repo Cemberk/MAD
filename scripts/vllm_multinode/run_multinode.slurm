@@ -303,6 +303,19 @@ for _v in ${COLOCATED_FORWARD_ENV//,/ }; do
 done
 echo "[fwd-env] forwarding: $(cut -d= -f1 "$_ENV_FILE" | tr "\n" " ")"
 
+# DOCKER_IMAGE_NAME and SLURM_JOB_NODELIST below are provenance for the perf CSV.
+# Both parse_to_csv.py implementations read them (_get_run_metadata -> docker_image,
+# machine_name) but run INSIDE the container, so a name the -e list omits is simply
+# absent and the column comes out blank. scripts/sglang_disagg passes both and its
+# rows carry the image tag and nodelist; this launcher passed neither, which is why
+# a green colocated run still published rows with no provenance.
+#
+# Keep every comment OUT of the docker run continuation below. A `#` line after a
+# trailing `\` is spliced onto the command, ends it at the comment, and leaves the
+# following `-e` lines to execute as commands -- which is exactly how build 61 died:
+#   docker: 'docker run' requires at least 1 argument
+#   /usr/bin/bash: line 148: -e: command not found
+# bash -n does not catch it; scripts/common/check_continuations.py does.
 docker run --rm \
     --device /dev/dri --device /dev/kfd --device /dev/infiniband \
     --network host --ipc host --group-add video \
@@ -325,12 +338,6 @@ docker run --rm \
     -e MASTER_PORT=$MASTER_PORT \
     -e IPADDRS=$IPADDRS \
     -e MODEL_NAME=$MODEL_NAME \
-    # Provenance for the perf CSV. Both parse_to_csv.py implementations already
-    # read these two names (_get_run_metadata -> docker_image, machine_name), but
-    # they run INSIDE the container, so a name the -e list omits is simply absent
-    # and the column comes out blank. scripts/sglang_disagg passes both and its
-    # rows carry the image tag and nodelist; this launcher passed neither, which
-    # is why a green colocated run still published rows with no provenance.
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
     -e MODEL_PATH=$MODEL_PATH \
