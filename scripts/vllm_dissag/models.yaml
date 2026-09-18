@@ -179,10 +179,12 @@ DeepSeek-R1:
   decode:
     dp: ""
 
-# Kimi-K3-MXFP4 (MI300X gfx942 wideEP disagg). Recipe knobs from
-# scripts/vllm/kimik3_mi300x/wideep_disagg_2p2d/; vLLM connector fixes live in the
+# Kimi-K3-MXFP4 (MI300X gfx942 wideEP disagg). Recipe knobs proven by the PR#241
+# standalone Kimi-K3 launcher (out of tree); vLLM connector fixes live in the
 # disagg image (the PR#241-proven v4 build; the recipe's vLLM/MoRIIO connector fixes are folded into that image's vLLM source).
 _kimik3_recipe_env: &kimik3_recipe_env
+  # TP size within each EP pool (TP2xDP8 -> EP16). Unset/1 = plain wideEP.
+  EP_TP_SIZE: "2"
   VLLM_USE_V1: "1"
   NCCL_DEBUG: "WARN"
   NCCL_DEBUG_SUBSYS: "INIT,NET"

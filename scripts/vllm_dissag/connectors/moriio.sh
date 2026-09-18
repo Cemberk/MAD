@@ -118,14 +118,14 @@ connector_setup_env() {
     export MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-17179869184}"
 }
 
-_moriio_is_kimik3() { [[ "${MODEL_NAME:-}" == "Kimi-K3-MXFP4" ]]; }
-
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
     local _proxy_port="${PROXY_PORT}"
     local _pod_hosts=""
-    if _moriio_is_kimik3; then
-        _proxy_port="${ROUTER_PORT:-30000}"
+    # TP-within-EP (EP_TP_SIZE>1): headless workers host real DP ranks, so the KV
+    # config must advertise the peer pool's hosts for cross-pool notify routing.
+    # (PROXY_PORT already == ROUTER_PORT for the vllm_router proxy; see connector_init.)
+    if (( ${EP_TP_SIZE:-1} > 1 )); then
         if [[ "$kv_role" == "kv_producer" ]]; then
             _pod_hosts="${DECODE_POD_HOSTS:-}"
         else
@@ -193,24 +193,26 @@ connector_launch_worker() {
         # ---- WIDE_EP=1 (MoriEP) ----
         # Per-role all2all: prefill=high_throughput, decode=low_latency. The
         # v1.2.0 image rejects the bare "mori" alias; these names are required.
-        # Kimi-K3-MXFP4 uses TP2×DP8 per pool (not -tp 1); see wideep_disagg_2p2d.
+        # TP-within-EP models (EP_TP_SIZE>1) run TP inside each EP pool (not -tp 1).
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
 
+        # TP-within-EP: EP_TP_SIZE>1 runs TP inside each EP pool (e.g. TP2xDP8->EP16);
+        # unset/1 keeps the historical -tp 1 wideEP layout.
+        local _ep_tp="${EP_TP_SIZE:-1}"
         local _tp_flag=(-tp 1)
         local _dp_local="${DP_PARALLEL_SIZE_LOCAL}"
         local _effective_dp="${dp_size}"
-        if _moriio_is_kimik3; then
-            local _k3_tp="${KIMIK3_TP_SIZE:-2}"
-            _tp_flag=(--tensor-parallel-size "${_k3_tp}")
-            _dp_local=$(( _GPUS_PER_NODE / _k3_tp ))
-            _effective_dp=$(( dp_size / _k3_tp ))
+        if (( _ep_tp > 1 )); then
+            _tp_flag=(--tensor-parallel-size "${_ep_tp}")
+            _dp_local=$(( _GPUS_PER_NODE / _ep_tp ))
+            _effective_dp=$(( dp_size / _ep_tp ))
         fi
 
         local extra_args=() kv_args=()
         local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
         if [[ "$role" == "master" ]]; then
-            if _moriio_is_kimik3; then
+            if (( _ep_tp > 1 )); then
                 extra_args+=(--api-server-count="${_effective_dp}")
             else
                 extra_args+=(--api-server-count=${_GPUS_PER_NODE})
@@ -218,8 +220,8 @@ connector_launch_worker() {
             kv_args+=(--kv-transfer-config "${kv_config}")
         else
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
-            # K3 headless workers host real DP ranks; they MUST carry kv-transfer-config.
-            _moriio_is_kimik3 && kv_args+=(--kv-transfer-config "${kv_config}")
+            # TP-within-EP headless workers host real DP ranks; they MUST carry kv-transfer-config.
+            (( _ep_tp > 1 )) && kv_args+=(--kv-transfer-config "${kv_config}")
         fi
 
         # Recipe knobs (overridable via env / models.yaml). DeepSeek-V3 on AITER
@@ -361,10 +363,10 @@ connector_start_proxy() {
         local _router_dp_local="${DP_PARALLEL_SIZE_LOCAL}"
         local _router_moriio_dp=""
         parallelism_is_wide_ep || _router_dp_local=1
-        if _moriio_is_kimik3; then
-            local _k3_tp="${KIMIK3_TP_SIZE:-2}"
-            _router_dp_local=$(( _GPUS_PER_NODE / _k3_tp ))
-            _router_moriio_dp=$(( (xP * _GPUS_PER_NODE) / _k3_tp ))
+        local _ep_tp="${EP_TP_SIZE:-1}"
+        if (( _ep_tp > 1 )); then
+            _router_dp_local=$(( _GPUS_PER_NODE / _ep_tp ))
+            _router_moriio_dp=$(( (xP * _GPUS_PER_NODE) / _ep_tp ))
         fi
         echo "Starting vllm-router (MoRIIO): HTTP ${ROUTER_PORT}"
         echo "  prefill=${PREFILL_URL}  decode=${DECODE_URL}  dp_local=${_router_dp_local}"

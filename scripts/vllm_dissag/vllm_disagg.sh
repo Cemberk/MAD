@@ -92,6 +92,20 @@ echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 host_ip=$(hostname -I | awk '{print $1}')
 host_name=$(hostname)
 
+# EP_TP_SIZE (TP within each EP pool; unset/1 = plain wideEP) may be supplied by the
+# recipe env: block, which is exported further below. Resolve it early -- env/-e wins --
+# so the topology math can size per-node DP ranks (TP-within-EP -> fewer ranks/node).
+if [[ -z "${EP_TP_SIZE:-}" && -n "$MODEL_NAME" && -f "${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" ]]; then
+    EP_TP_SIZE="$(MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+PY
+)"
+fi
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
+
 # =============================================================================
 # Topology math
 # =============================================================================
@@ -103,10 +117,9 @@ PREFILL_DP_START_RANK=$(( NODE_RANK * _GPUS_PER_NODE ))
 PREFILL_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' '{print $1}')
 DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _GPUS_PER_NODE ))
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
-# Kimi-K3 disagg: TP2×DP8 per pool -> 4 DP ranks/node (not 8).
-if [[ "${MODEL_NAME:-}" == "Kimi-K3-MXFP4" && "${WIDE_EP:-0}" == "1" ]]; then
-    _k3_tp="${KIMIK3_TP_SIZE:-2}"
-    DP_PARALLEL_SIZE_LOCAL=$(( _GPUS_PER_NODE / _k3_tp ))
+# TP-within-EP (EP_TP_SIZE>1): TP inside each EP pool -> fewer DP ranks/node.
+if [[ "${WIDE_EP:-0}" == "1" ]] && (( ${EP_TP_SIZE:-1} > 1 )); then
+    DP_PARALLEL_SIZE_LOCAL=$(( _GPUS_PER_NODE / ${EP_TP_SIZE} ))
     PREFILL_DP_START_RANK=$(( NODE_RANK * DP_PARALLEL_SIZE_LOCAL ))
     DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * DP_PARALLEL_SIZE_LOCAL ))
 fi

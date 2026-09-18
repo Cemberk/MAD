@@ -283,12 +283,12 @@ into each rank's kv JSON as `moriio_pod_hosts`.
 kernel variants; Slurm mounts separate `.../prefill` vs `.../decode` cache dirs under the image key
 when `MODEL_NAME=Kimi-K3-MXFP4`.
 
-Reference standalone launcher: [`../vllm/kimik3_mi300x/wideep_disagg_2p2d/`](../vllm/kimik3_mi300x/wideep_disagg_2p2d/).
+Reference standalone launcher: the Kimi-K3 disagg recipe in PR#241 (out of tree; not part of this framework-only branch).
 
 ### Docker image (out of scope for MAD merge)
 
 Kimi-K3-MXFP4 **does not** use `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`. It has its own
-[`Dockerfile.kimik3_disagg`](../vllm/kimik3_mi300x/wideep_disagg_2p2d/Dockerfile.kimik3_disagg)
+`Dockerfile.kimik3_disagg` (in the PR#241 standalone recipe, out of tree)
 (vLLM branch `kimi-k3-wideep-disagg-fullsource-v3`, MoRI `--no-build-isolation`, vllm-router).
 Upstream integration adds **launcher + yaml + docs** only; operators build/tag
 `kimik3-wideep-disagg:latest` separately and pass `DOCKER_IMAGE_NAME` to slurm.

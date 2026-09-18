@@ -27,6 +27,8 @@ _has()   { grep -qF -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pas
 _hasre() { grep -qE -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
 _hasnot(){ grep -qF -- "$2" <<<"$1" && { printf "  FAIL  %s (unexpected: %s)\n" "$3" "$2"; fail=$((fail+1)); } || { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); }; }
 _count() { local n; n="$(grep -cF -- "$2" <<<"$1")"; [[ "$n" == "$3" ]] && { printf "  PASS  %s (=%s)\n" "$4" "$n"; pass=$((pass+1)); } || { printf "  FAIL  %s (got %s want %s)\n" "$4" "$n" "$3"; fail=$((fail+1)); }; }
+# assert a flag line ($2) is immediately followed by an exact value line ($3) in argv $1
+_hasadj() { grep -A1 -xF -- "$2" <<<"$1" | grep -qxF -- "$3" && { printf "  PASS  %s\n" "$4"; pass=$((pass+1)); } || { printf "  FAIL  %s (want %s -> %s)\n" "$4" "$2" "$3"; fail=$((fail+1)); }; }
 
 echo "=== moriio + TP (Llama-70B) ==="
 A="$(_argv moriio 0 '' amd-Llama-3.3-70B-Instruct-FP8-KV /m/Llama)"
@@ -60,11 +62,11 @@ _argv_k3() {
 }
 C="$(_argv_k3)"
 _has    "$C" "--tensor-parallel-size" "K3 has --tensor-parallel-size"
-_hasre   "$C" "^2$" "K3 TP=2"
+_hasadj  "$C" "--tensor-parallel-size" "2" "K3 TP=2 (value adjacent to flag)"
 _has    "$C" "--data-parallel-size" "K3 has --data-parallel-size"
-_hasre   "$C" "^8$" "K3 dp_size=8 (line)"
+_hasadj  "$C" "--data-parallel-size" "8" "K3 dp_size=8 (adjacent)"
 _has    "$C" "--data-parallel-size-local" "K3 has dp_local flag"
-_hasre   "$C" "^4$" "K3 dp_local=4 (line)"
+_hasadj  "$C" "--data-parallel-size-local" "4" "K3 dp_local=4 (adjacent)"
 _has    "$C" "--enable-expert-parallel" "K3 has EP"
 _has    "$C" "moriio_pod_hosts" "K3 kv config has pod hosts"
 _has    "$C" "--api-server-count=8" "K3 api-server-count=dp_size"
