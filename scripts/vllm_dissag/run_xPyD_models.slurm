@@ -252,14 +252,24 @@ LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 
-# Kimi-K3-MXFP4 disagg requires validated 2P/2D topology (TP2×DP8 per pool).
-if [[ "$MODEL_NAME" == "Kimi-K3-MXFP4" ]]; then
+# Resolve EP_TP_SIZE (TP within each EP pool; unset/1 = plain wideEP) from the recipe so
+# submit-time topology/JIT decisions match the in-container launcher. env/-e still wins.
+if [[ -z "${EP_TP_SIZE:-}" && -n "${MODEL_NAME:-}" && -f "${SCRIPT_DIR}/models.yaml" ]]; then
+  EP_TP_SIZE="$(MODELS_YAML="${SCRIPT_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+PY
+)"
+fi
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
+
+# TP-within-EP (EP_TP_SIZE>1) is only valid on the wideEP MoRIIO path. Per-pool sizing is
+# validated in vllm_disagg.sh (EP_TP_SIZE must divide GPUS_PER_NODE). Recommended shape: 2P/2D.
+if (( ${EP_TP_SIZE:-1} > 1 )); then
   if [[ "$WIDE_EP" != "1" || "$CONNECTOR" != "moriio" ]]; then
-    echo "Error: Kimi-K3-MXFP4 requires CONNECTOR=moriio WIDE_EP=1 (combo 3)." >&2
-    exit 1
-  fi
-  if [[ "$xP" -ne 2 || "$yD" -ne 2 ]]; then
-    echo "Error: Kimi-K3-MXFP4 requires xP=2 yD=2 (2P/2D disagg); got xP=$xP yD=$yD." >&2
+    echo "Error: EP_TP_SIZE=${EP_TP_SIZE} (TP-within-EP) requires CONNECTOR=moriio WIDE_EP=1." >&2
     exit 1
   fi
 fi
@@ -342,10 +352,7 @@ echo ""
 # Calculate NUM_NODES based on xP and yD
 NUM_NODES=$((xP + yD))
 echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
-if [[ "$MODEL_NAME" == "Kimi-K3-MXFP4" && "$NUM_NODES" -ne 4 ]]; then
-  echo "Error: Kimi-K3-MXFP4 requires 4 nodes (xP=2 + yD=2); NUM_NODES=$NUM_NODES." >&2
-  exit 1
-fi
+# NUM_NODES is derived generically from xP+yD; no per-model node-count lock.
 
 # DeepEP configuration (only exported when RUN_DEEPEP=1)
 if [[ "$_run_deepep" == "1" ]]; then
@@ -523,8 +530,8 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
     _IMG_KEY="${_IMG_KEY:-noimg}";
     _JIT_BASE="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
-    # Kimi-K3: prefill and decode compile different AITER kernel variants — separate caches.
-    if [ "${MODEL_NAME}" = "Kimi-K3-MXFP4" ] && [ "${JIT_CACHE_SPLIT_K3:-1}" = "1" ]; then
+    # TP-within-EP (EP_TP_SIZE>1): prefill/decode compile different AITER kernel variants — separate caches.
+    if (( ${EP_TP_SIZE:-1} > 1 )) && [ "${JIT_CACHE_SPLIT_ROLE:-1}" = "1" ]; then
         if [ "${SLURM_PROCID}" -lt "${xP}" ]; then
             _JIT_ROLE="prefill";
         else

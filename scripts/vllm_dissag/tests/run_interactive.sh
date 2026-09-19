@@ -34,13 +34,26 @@ mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
 # on local NVMe for speed. Keyed by the image ID so a new image (different kernels/ABI)
 # starts a fresh cache instead of reusing stale .so's; set JIT_CACHE_HOST to override, or
 # JIT_CACHE_PERSIST=0 to disable and fall back to an ephemeral in-container cache.
+# Resolve EP_TP_SIZE from the recipe (TP within each EP pool; unset/1 = plain wideEP) so the
+# host-side JIT-cache role split matches the in-container launcher. env/-e wins.
+if [[ -z "${EP_TP_SIZE:-}" && -n "${MODEL_NAME:-}" && -f "${NIXL_REPO_DIR}/models.yaml" ]]; then
+  EP_TP_SIZE="$(MODELS_YAML="${NIXL_REPO_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+PY
+)"
+fi
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
+
 if [[ "${JIT_CACHE_PERSIST:-1}" == "1" ]]; then
     _IMG_KEY="$(docker image inspect --format '{{.Id}}' "$DOCKER_IMAGE_NAME" 2>/dev/null | sed 's/^sha256://; s/[^a-f0-9]//g' | cut -c1-12)"
     _IMG_KEY="${_IMG_KEY:-noimg}"
     _JIT_BASE="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
-    # Kimi-K3: prefill and decode compile different AITER kernel variants — separate caches
+    # TP-within-EP (EP_TP_SIZE>1): prefill/decode compile different AITER kernel variants — separate caches
     # (same logic as run_xPyD_models.slurm; missing this caused PIECEWISE decode hang — F25).
-    if [[ "${MODEL_NAME}" == "Kimi-K3-MXFP4" && "${JIT_CACHE_SPLIT_K3:-1}" == "1" ]]; then
+    if (( ${EP_TP_SIZE:-1} > 1 )) && [[ "${JIT_CACHE_SPLIT_ROLE:-1}" == "1" ]]; then
         if [[ "${NODE_RANK:-0}" -lt "${xP:-1}" ]]; then
             _JIT_ROLE="prefill"
         else

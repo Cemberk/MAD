@@ -75,6 +75,30 @@ _has    "$C" "kimi_k3" "K3 reasoning parser value"
 _hasnot "$C" "-tp 1" "K3 not -tp 1"
 
 echo ""
+echo "=== -e EP_TP_SIZE=1 override beats the recipe (K3 falls back to plain wideEP -tp 1) ==="
+Cov="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+    MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 EP_TP_SIZE=1 \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f')"
+_hasadj "$Cov" "-tp" "1" "EP_TP_SIZE=1 override -> -tp 1 (adjacent)"
+_hasnot "$Cov" "--tensor-parallel-size" "EP_TP_SIZE=1 override -> no --tensor-parallel-size"
+
+echo ""
+echo "=== EP_TP_SIZE divisibility guard rejects an indivisible value ==="
+if env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+    MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 EP_TP_SIZE=3 \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" >/dev/null 2>&1; then
+  printf "  FAIL  EP_TP_SIZE=3 should be rejected (indivisible by GPUS_PER_NODE=8)\n"; fail=$((fail+1))
+else
+  printf "  PASS  EP_TP_SIZE=3 rejected (indivisible by GPUS_PER_NODE=8)\n"; pass=$((pass+1))
+fi
+
+echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.

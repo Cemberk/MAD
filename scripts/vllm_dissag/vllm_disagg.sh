@@ -119,6 +119,10 @@ DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _GPUS_PER_NODE ))
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
 # TP-within-EP (EP_TP_SIZE>1): TP inside each EP pool -> fewer DP ranks/node.
 if [[ "${WIDE_EP:-0}" == "1" ]] && (( ${EP_TP_SIZE:-1} > 1 )); then
+    if (( _GPUS_PER_NODE % EP_TP_SIZE != 0 || PREFILL_DP_SIZE % EP_TP_SIZE != 0 || DECODE_DP_SIZE % EP_TP_SIZE != 0 )); then
+        echo "Error: EP_TP_SIZE=${EP_TP_SIZE} must divide GPUS_PER_NODE=${_GPUS_PER_NODE} and per-pool DP sizes (prefill=${PREFILL_DP_SIZE}, decode=${DECODE_DP_SIZE})." >&2
+        exit 1
+    fi
     DP_PARALLEL_SIZE_LOCAL=$(( _GPUS_PER_NODE / ${EP_TP_SIZE} ))
     PREFILL_DP_START_RANK=$(( NODE_RANK * DP_PARALLEL_SIZE_LOCAL ))
     DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * DP_PARALLEL_SIZE_LOCAL ))
