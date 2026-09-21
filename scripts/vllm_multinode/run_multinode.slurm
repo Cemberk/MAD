@@ -377,7 +377,28 @@ docker run --rm \
 rm -f "$_ENV_FILE"
 '
 
-srun --nodelist="$SELECTED_NODELIST" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+# Run the teardown on EXIT as well, not only on the happy path.
+#
+# `docker run` here is attached, not detached, but the container belongs to the
+# docker daemon rather than to this job: scancel kills this script and the srun
+# under it, and the container carries on holding its GPU memory. The node then
+# looks occupied to the next job with no SLURM job on it to explain why, which is
+# what build 93 hit --
+#     RuntimeError: The memory capacity is unbalanced.
+#                   Some GPUs may be occupied by other processes.
+# -- after build 93 itself had been cancelled at the 4 hour wall clock.
+#
+# So every run that ends early now cleans up after itself instead of leaving the
+# mess for whoever allocates the node next. Idempotent, so the explicit call below
+# and the trap can both fire.
+_colocated_teardown() {
+    srun --nodelist="$SELECTED_NODELIST" bash -c \
+        'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true' \
+        2>/dev/null || true
+}
+trap _colocated_teardown EXIT INT TERM
+
+_colocated_teardown
 
 # Publish the perf CSV where madengine collects it. The benchmark writes
 # /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host),
