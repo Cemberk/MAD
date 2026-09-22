@@ -274,21 +274,21 @@ flowchart TB
 | **W4** | `decode_worker` | `xP+1` (3) | yes, start-rank 4 | `kv_consumer` | **must** carry `--kv-transfer-config` |
 | **W5** | (router) | 0 only | — | — | `--moriio-dp-size 8`, `--intra-node-data-parallel-size 4` |
 
-**Required topology:** `xP=2`, `yD=2`, **4 nodes** — enforced in `run_xPyD_models.slurm`.
+**Example topology (K3 2P/2D):** `xP=2`, `yD=2`, **4 nodes**. The launcher is generic (`NUM_NODES=xP+yD`, any `xP+yD>=2`); no K3-specific topology lock is enforced in `run_xPyD_models.slurm`.
 
 **Pod hosts:** `PREFILL_POD_HOSTS` / `DECODE_POD_HOSTS` from `IPADDRS` (first `xP` / next `yD` IPs) go
 into each rank's kv JSON as `moriio_pod_hosts`.
 
 **JIT cache:** K3 prefill (mori HT/LL + cudagraph NONE) and decode (LL + PIECEWISE) compile different
 kernel variants; Slurm mounts separate `.../prefill` vs `.../decode` cache dirs under the image key
-when `MODEL_NAME=Kimi-K3-MXFP4`.
+when `EP_TP_SIZE>1` (set for K3 in `models.yaml`; gated by `JIT_CACHE_SPLIT_ROLE`).
 
 Reference standalone launcher: the Kimi-K3 disagg recipe in PR#241 (out of tree; not part of this framework-only branch).
 
-### Docker image (out of scope for MAD merge)
+### Docker image
 
-Kimi-K3-MXFP4 **does not** use `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`. It has its own
-`Dockerfile.kimik3_disagg` (in the PR#241 standalone recipe, out of tree)
+Kimi-K3-MXFP4 uses its own in-tree
+`docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile` (a K3-specialized sibling of the generalized `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`)
 (vLLM branch `kimi-k3-wideep-disagg-fullsource-v3`, MoRI `--no-build-isolation`, vllm-router).
-Upstream integration adds **launcher + yaml + docs** only; operators build/tag
+Upstream integration adds **launcher + yaml + docs + Dockerfile**; operators build/tag
 `kimik3-wideep-disagg:latest` separately and pass `DOCKER_IMAGE_NAME` to slurm.

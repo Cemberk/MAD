@@ -53,20 +53,19 @@ slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek fam
 | `DeepSeek-V3` | MoE | 3, 4 (wideEP only) | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
-| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; needs `kimik3-wideep-disagg` image (built from the standalone Kimi-K3 recipe, PR#241) |
+| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; needs `kimik3-wideep-disagg` image (built in-tree from `docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile`) |
 
 Standalone reference launcher (debug / OCI): the Kimi-K3 disagg recipe in PR#241 (out of tree; not part of this framework-only branch).
 
 See [ARCHITECTURE.md — Kimi-K3 worker taxonomy](ARCHITECTURE.md#5-kimi-k3-mxfp4-worker-taxonomy-w1w5) for W1–W5 ↔ `NODE_RANK` mapping.
 
-**Separate Docker image (not merged into MAD `docker/`):** build only from
-`Dockerfile.kimik3_disagg` in the standalone Kimi-K3 recipe (PR#241; out of tree).
-MAD integration is launcher + yaml; vLLM fork and connector fixes stay in that recipe Dockerfile.
+**Docker image (in-tree):** build from
+`docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile` (the folded-in Kimi-K3 disagg image, ex-PR#241 recipe).
+MAD integration is launcher + yaml + this Dockerfile; the vLLM fork and connector fixes are pinned as its build args.
 
 ```bash
-# Build (once per cluster / after vLLM pin change), from the PR#241 recipe dir (out of tree):
-cd <kimik3-disagg-recipe>   # PR#241: kimik3_mi300x/wideep_disagg_2p2d
-docker build -f Dockerfile.kimik3_disagg \
+# Build (once per cluster / after vLLM pin change), from the MAD repo root:
+docker build -f docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile \
   --build-arg VLLM_REF=kimi-k3-wideep-disagg-fullsource-v3 \
   -t kimik3-wideep-disagg:latest .
 

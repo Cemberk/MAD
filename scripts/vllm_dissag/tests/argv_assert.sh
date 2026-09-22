@@ -99,6 +99,58 @@ else
 fi
 
 echo ""
+echo ""
+echo "=== non-K3 wideEP: EP_TP_SIZE dormant (plain -tp 1, no role split) ==="
+# emit argv for an explicit rank/topology cell
+_argv_rank() { # connector wide ep model rank xP yD
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK="$5" xP="$6" yD="$7" CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
+    MODEL_NAME="$4" MODEL_PATH=/m/M MASTER_ADDR=10.0.0.1 \
+    IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+Dm="$(_argv_rank moriio 1 mori DeepSeek-V3 0 2 2)"
+_hasadj "$Dm" "-tp" "1" "DSV3 wideEP -> -tp 1 (adjacent)"
+_hasnot "$Dm" "--tensor-parallel-size" "DSV3 wideEP -> no --tensor-parallel-size"
+_hasnot "$Dm" "moriio_pod_hosts" "DSV3 wideEP -> no K3 pod-hosts in kv-config"
+_has    "$Dm" "--api-server-count" "DSV3 wideEP -> has --api-server-count"
+Dh="$(_argv_rank moriio 1 mori DeepSeek-V3 1 2 2)"
+_has    "$Dh" "--headless" "DSV3 wideEP headless child -> --headless"
+_hasnot "$Dh" "--kv-transfer-config" "DSV3 wideEP headless child -> no --kv-transfer-config"
+
+echo ""
+echo "=== EP_TP_SIZE knob is model-agnostic (DSV3 behaves like K3 per value) ==="
+_argv_eptp() { # model ep_tp_size
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+    MODEL_NAME="$1" MODEL_PATH=/m/M EP_TP_SIZE="$2" MASTER_ADDR=10.0.0.1 \
+    IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+_guard_rejects() { # model ep_tp_size  (indivisible -> vllm_disagg exits nonzero)
+  if env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+      DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+      MODEL_NAME="$1" MODEL_PATH=/m/M EP_TP_SIZE="$2" MASTER_ADDR=10.0.0.1 \
+      IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+      GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+      bash "$DIR/vllm_disagg.sh" >/dev/null 2>&1; then
+    printf "  FAIL  %s EP_TP_SIZE=%s should be rejected (indivisible)\n" "$1" "$2"; fail=$((fail+1))
+  else
+    printf "  PASS  %s EP_TP_SIZE=%s rejected by divisibility guard\n" "$1" "$2"; pass=$((pass+1))
+  fi
+}
+for M in DeepSeek-V3 Kimi-K3-MXFP4; do
+  E1="$(_argv_eptp "$M" 1)"
+  _hasadj "$E1" "-tp" "1" "$M EP_TP_SIZE=1 -> -tp 1 (adjacent)"
+  _has    "$E1" "--api-server-count=8" "$M EP_TP_SIZE=1 -> api-server-count=8"
+  E4="$(_argv_eptp "$M" 4)"
+  _hasadj "$E4" "--tensor-parallel-size" "4" "$M EP_TP_SIZE=4 -> TP=4 (adjacent)"
+  _has    "$E4" "--api-server-count=4" "$M EP_TP_SIZE=4 -> api-server-count=4"
+  _guard_rejects "$M" 3
+done
+
 echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.
