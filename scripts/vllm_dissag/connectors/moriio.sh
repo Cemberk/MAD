@@ -86,10 +86,10 @@ connector_setup_env() {
     export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
     export VLLM_HANDSHAKE_TIMEOUT_MINS="${VLLM_HANDSHAKE_TIMEOUT_MINS:-30}"
 
-    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/opt/vllm_cache/triton}"
-    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/opt/vllm_cache/vllm}"
-    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/opt/vllm_cache/comgr}"
-    export AITER_JIT_DIR="${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}"
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton}"
+    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm}"
+    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr}"
+    export AITER_JIT_DIR="${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit}"
     mkdir -p "${TRITON_CACHE_DIR}" "${VLLM_CACHE_ROOT}" "${COMGR_CACHE_DIR}" "${AITER_JIT_DIR}" 2>/dev/null || true
 
     if [[ "${VLLM_ROCM_USE_AITER:-1}" == "1" ]]; then
