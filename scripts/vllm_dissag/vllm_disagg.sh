@@ -141,15 +141,25 @@ DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _DP_PER_NODE ))
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
 
 # Peer-pool node IPs, ordered by pod index (= global_dp_rank / dp_per_node).
-# A pool that spans MORE THAN ONE node must advertise every peer node to the KV
-# connector: otherwise the connector falls back to the peer pool's MASTER only,
-# and KV writes/notifies aimed at DP ranks living on a peer CHILD node silently
-# miss -> those ranks decode with no context. Single-node pools (xP=1 && yD=1,
-# the historical case) do not need this, so it stays empty there and the emitted
-# command line is unchanged.
+# Needed only when the router addresses the WHOLE pool's DP ranks, which it does
+# exactly when EP_TP_SIZE>1 (moriio.sh then passes --moriio-dp-size). The K3
+# connector maps a rank to pod_hosts[rank // (remote_dp_size / len(pod_hosts))].
+# At EP_TP_SIZE=1 the router only targets ranks 0..dp_per_node-1, all on each
+# pool's master, and a 2-host list would send master ranks 4-7 to the peer
+# CHILD node's IP -- so it is left empty there, as on develop. The generic
+# (DeepSeek) connector does not read the key at all.
 PREFILL_POD_HOSTS=""
 DECODE_POD_HOSTS=""
-if [ "$xP" -gt 1 ] || [ "$yD" -gt 1 ]; then
+if [[ "${WIDE_EP:-0}" == "1" ]] && (( EP_TP_SIZE > 1 )); then
+    # remote_dp_size is the PREFILL pool's DP width for both directions (router
+    # --moriio-dp-size), so the decode side's pod math is only right when the
+    # pools match.
+    if [ "$xP" -ne "$yD" ]; then
+        echo "Error: EP_TP_SIZE=${EP_TP_SIZE} needs equal pools (xP=${xP} yD=${yD}): the router" >&2
+        echo "       advertises one DP width for both, and the connector derives each pool's" >&2
+        echo "       ranks-per-node from it." >&2
+        exit 1
+    fi
     PREFILL_POD_HOSTS=$(printf '%s\n' "${IP_ARRAY[@]:0:$xP}" | paste -sd, -)
     DECODE_POD_HOSTS=$(printf '%s\n' "${IP_ARRAY[@]:$xP:$yD}" | paste -sd, -)
 fi

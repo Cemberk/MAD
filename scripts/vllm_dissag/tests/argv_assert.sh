@@ -163,13 +163,25 @@ _argv_rank() { # connector wide ep model rank xP yD
 Dm="$(_argv_rank moriio 1 mori DeepSeek-V3 0 2 2)"
 _hasadj "$Dm" "-tp" "1" "DSV3 wideEP -> -tp 1 (adjacent)"
 _hasnot "$Dm" "--tensor-parallel-size" "DSV3 wideEP -> no --tensor-parallel-size"
-# A 2-node pool advertises its peer nodes for every model, not only TP-within-EP:
-# without them KV aimed at ranks on a peer CHILD node falls back to the peer MASTER.
-_has    "$Dm" "moriio_pod_hosts" "DSV3 wideEP 2P/2D -> pod-hosts (pools span nodes)"
+# At EP_TP_SIZE=1 the router only targets master-node ranks; a pod-host list there
+# would misroute them on the K3 connector (it maps rank -> host by remote_dp_size).
+_hasnot "$Dm" "moriio_pod_hosts" "DSV3 wideEP 2P/2D -> no pod-hosts (EP_TP_SIZE=1)"
 _has    "$Dm" "--api-server-count" "DSV3 wideEP -> has --api-server-count"
 Dh="$(_argv_rank moriio 1 mori DeepSeek-V3 1 2 2)"
 _has    "$Dh" "--headless" "DSV3 wideEP headless child -> --headless"
 _hasnot "$Dh" "--kv-transfer-config" "DSV3 wideEP headless child -> no --kv-transfer-config"
+
+echo ""
+echo "=== EP_TP_SIZE>1 needs equal pools ==="
+if env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=2 yD=1 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+    MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" >/dev/null 2>&1; then
+  echo "  FAIL  EP_TP_SIZE=2 with xP=2 yD=1 should be rejected"; fail=$((fail+1))
+else
+  echo "  PASS  EP_TP_SIZE=2 with xP=2 yD=1 rejected"; pass=$((pass+1))
+fi
 
 echo ""
 echo "=== TP_SIZE from cluster.sh does not leak into the wideEP layout ==="

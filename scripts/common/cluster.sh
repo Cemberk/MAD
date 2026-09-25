@@ -162,6 +162,23 @@ export IBV_DRIVERS="${IBV_DRIVERS:-${_arch_drivers}}"
 # cx7 only; the other archetypes name their KV device directly.
 export USE_CX7_NICS="${USE_CX7_NICS:-0}"
 export KV_IB_DEVICE="${KV_IB_DEVICE:-${_arch_kv_nic}}"
+
+# RDMA rails: the GPU-attached NICs that NCCL and MoRI move data over. The
+# connectors default to one CX7 cluster's list (mlx5_0,2,3,4,5,7,8,9), which names
+# devices that do not exist on an AINIC or Thor2 node -- NCCL then skips them and
+# falls back to TCP, and the run still reports a number. So on those fabrics the
+# rails come from the archetype. On cx7 nothing is set here: each connector keeps
+# the choice it already makes (rixl.sh even probes ibstat, which a preset
+# NCCL_IB_HCA would switch off), so the fabric this was validated on is unchanged.
+case "${CLUSTER_ARCHETYPE}" in
+    ainic) _arch_rails="rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7" ;;
+    thor2) _arch_rails="bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7" ;;
+    *)     _arch_rails="" ;;
+esac
+if [ -n "${_arch_rails}" ]; then
+    export NCCL_IB_HCA="${NCCL_IB_HCA:-${_arch_rails}}"
+    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_arch_rails}}"
+fi
 export FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
 
 # --------------------------------------------------------------- ports
@@ -503,4 +520,26 @@ cluster_require_gpu_arch() {
     echo "  image build arch), so it would fail late or report wrong numbers here." >&2
     echo "  Run it on a partition with ${allowed}, or use the model's ${MAD_GPU_ARCH} recipe." >&2
     return 1
+}
+
+# cluster_report_rdma_rails
+#
+# Prints the rails this job will use and warns about any that is absent or not
+# ACTIVE on this node. Evidence only -- it changes nothing. A rail list that
+# names the wrong devices does not fail: NCCL drops them and runs over TCP. This
+# line is what makes that visible in the job log instead of only in the numbers.
+cluster_report_rdma_rails() {
+    local rails="${NCCL_IB_HCA:-${MORI_RDMA_DEVICES:-}}" d st bad=""
+    if [ -z "${rails}" ]; then
+        echo "RDMA rails: connector default (fabric ${CLUSTER_ARCHETYPE:-unknown})"
+        return 0
+    fi
+    for d in ${rails//,/ }; do
+        d="${d%%:*}"
+        st="$(cat "/sys/class/infiniband/${d}/ports/1/state" 2>/dev/null || true)"
+        case "${st}" in *ACTIVE*) : ;; *) bad="${bad} ${d}(${st:-absent})" ;; esac
+    done
+    echo "RDMA rails: ${rails} (fabric ${CLUSTER_ARCHETYPE:-unknown})"
+    [ -z "${bad}" ] || echo "WARN: rails not ACTIVE on $(hostname):${bad} -- traffic on them will fall back or fail" >&2
+    return 0
 }

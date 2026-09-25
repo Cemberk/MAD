@@ -121,9 +121,9 @@ connector_setup_env() {
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
     # Peer-pool node list. A kv_producer (prefill) handshakes the DECODE pool, a
-    # kv_consumer (decode) notifies the PREFILL pool. The driver leaves both empty
-    # for single-node pools (xP=1 && yD=1), in which case the key is omitted and
-    # the emitted config is byte-identical to the historical one.
+    # kv_consumer (decode) notifies the PREFILL pool. The driver fills them only
+    # when EP_TP_SIZE>1 (see vllm_disagg.sh); otherwise the key is omitted and the
+    # emitted config is byte-identical to the historical one.
     local _peer=""
     if [[ "${kv_role}" == "kv_producer" ]]; then _peer="${DECODE_POD_HOSTS:-}"; else _peer="${PREFILL_POD_HOSTS:-}"; fi
     local _pod_hosts=""

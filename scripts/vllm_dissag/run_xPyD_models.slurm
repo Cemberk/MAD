@@ -327,6 +327,7 @@ echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
 # Before the weights probe: the wrong GPU should cost seconds, not a checkpoint read.
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}" || exit 1
+cluster_report_rdma_rails
 
 # Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
 # explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
