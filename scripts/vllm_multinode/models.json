@@ -27,7 +27,8 @@
             "time": "24:00:00"
         },
         "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "Kimi-K3",
             "TP_SIZE": "8",
             "PP_SIZE": "2",
@@ -69,7 +70,8 @@
             "time": "24:00:00"
         },
         "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MAD_CONFIG": "mad-config.kimi-k3.yaml",
             "BENCHMARK_SCRIPT": "niah"
         },
@@ -103,7 +105,8 @@
             "time": "24:00:00"
         },
         "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "Kimi-K3",
             "TP_SIZE": "8",
             "PP_SIZE": "2",
@@ -146,7 +149,8 @@
             "time": "24:00:00"
         },
         "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "Kimi-K3",
             "TP_SIZE": "8",
             "PP_SIZE": "2",

@@ -394,3 +394,113 @@ cluster_nvme_mount() {
     [ -d "${root}" ] && printf -- '-v %s:%s' "${root}" "${root}"
     return 0
 }
+
+# --------------------------------------------------------------- GPU architecture
+#
+# A recipe is built for one GPU architecture. The Kimi-K3 disagg recipes on MI300X
+# requantize the MoE to int4 because gfx942 has no scaled-MXFP4 MFMA and turn off
+# AITER MLA because that kernel is gfx950-only; the MI355X recipes do the opposite.
+# Run on the other GPU, neither fails cleanly: they take the allocation, load
+# ~1.5 TB of weights and die in kernel codegen or return wrong numbers.
+#
+# The model card's skip_gpu_arch says the same thing to an orchestrator, but only
+# the orchestrator reads it, and on SLURM it runs on a login node with no GPU to
+# compare against. So the launcher checks for itself, on the nodes it was given.
+# Because it happens here, it is identical under STANDALONE and MADENGINE.
+
+# _cluster_local_gpu_arch
+#
+# Echoes this node's gfx name, or nothing. Read from the KFD topology the kernel
+# driver publishes, so it works on a host with no ROCm userspace installed; the
+# container has rocminfo, the bare node often does not. gfx_target_version encodes
+# major*10000 + minor*100 + stepping, and the gfx name spells minor and stepping in
+# hex: 90402 -> gfx942, 90500 -> gfx950, 90010 -> gfx90a. CPU agents report 0.
+_cluster_local_gpu_arch() {
+    local _p _v _arch=""
+    for _p in /sys/class/kfd/kfd/topology/nodes/*/properties; do
+        [ -r "$_p" ] || continue
+        _v="$(awk '$1=="gfx_target_version"{print $2}' "$_p" 2>/dev/null)"
+        [ -n "$_v" ] && [ "$_v" != "0" ] || continue
+        _arch="$(printf 'gfx%d%x%x' $((_v / 10000)) $(((_v / 100) % 100)) $((_v % 100)))"
+        break
+    done
+    if [ -z "$_arch" ] && command -v rocminfo >/dev/null 2>&1; then
+        _arch="$(rocminfo 2>/dev/null | grep -o -m1 'gfx[0-9a-f]\+' || true)"
+    fi
+    echo "$_arch"
+}
+
+# cluster_detect_gpu_arch
+#
+# Sets and exports MAD_GPU_ARCH to the architecture of EVERY allocated node, or
+# leaves it empty when that cannot be established. An explicit MAD_GPU_ARCH wins
+# and skips the probe. Returns 1 only for a MIXED allocation: ranks of one job on
+# two architectures cannot run one recipe, and that is never the scheduler's
+# intent, so it is reported rather than resolved.
+cluster_detect_gpu_arch() {
+    if [ -n "${MAD_GPU_ARCH:-}" ]; then
+        echo "GPU arch: ${MAD_GPU_ARCH} (set explicitly, not probed)"
+        export MAD_GPU_ARCH
+        return 0
+    fi
+    local out archs n
+    if [ -n "${SLURM_JOB_ID:-}" ] && command -v srun >/dev/null 2>&1; then
+        n="${SLURM_NNODES:-1}"
+        # Same shape as cluster_check_model_path: the body always exits 0, so a node
+        # that cannot answer shows up as a missing line, not as a failed step in sacct.
+        out="$(srun --nodes="${n}" --ntasks="${n}" /bin/bash -c \
+            "$(declare -f _cluster_local_gpu_arch); echo \"\$(hostname) \$(_cluster_local_gpu_arch)\"; exit 0" \
+            2>/dev/null || true)"
+    else
+        out="$(hostname) $(_cluster_local_gpu_arch)"
+    fi
+    [ -n "${out}" ] && printf '%s\n' "${out}" | sed 's/^/  gpu arch: /'
+    # Sourced under `set -euo pipefail` by run_multinode.slurm: a probe that finds
+    # nothing must fall through to the warning below, not end the job.
+    archs="$(printf '%s\n' "${out}" | awk 'NF>=2{print $2}' | sort -u || true)"
+    MAD_GPU_ARCH=""
+    case "$(printf '%s\n' "${archs}" | grep -c . || true)" in
+        0)  echo "GPU arch: could not be determined on these nodes" ;;
+        1)  MAD_GPU_ARCH="${archs}"
+            echo "GPU arch: ${MAD_GPU_ARCH} on all allocated nodes" ;;
+        *)  echo "x The allocation mixes GPU architectures: $(echo ${archs})." >&2
+            echo "  One job runs one recipe; constrain the allocation to one GPU type." >&2
+            return 1 ;;
+    esac
+    export MAD_GPU_ARCH
+    return 0
+}
+
+# cluster_require_gpu_arch <model> <allowed archs>
+#
+# Fails when the recipe for <model> declares the architectures it supports and the
+# allocation is none of them. <allowed archs> is comma- or space-separated; empty
+# means the recipe does not restrict, and nothing is checked. When the architecture
+# cannot be determined the run continues with a warning: refusing a job on missing
+# information would be worse than the failure this check exists to prevent.
+# GPU_ARCH_CHECK=0 bypasses the check, for bringing up a recipe on a new GPU.
+cluster_require_gpu_arch() {
+    local model="$1" allowed="${2:-}"
+    cluster_detect_gpu_arch || return 1
+    # Label the results with the GPU the run actually used rather than a default.
+    export PERF_GPU_ARCH="${PERF_GPU_ARCH:-${MAD_GPU_ARCH}}"
+    [ -n "${allowed//[, ]/}" ] || return 0
+    if [ "${GPU_ARCH_CHECK:-1}" = "0" ]; then
+        echo "GPU_ARCH_CHECK=0: not enforcing ${model}'s supported archs (${allowed})"
+        return 0
+    fi
+    if [ -z "${MAD_GPU_ARCH}" ]; then
+        echo "WARN: ${model} supports only ${allowed}, and this allocation's GPU arch could" >&2
+        echo "      not be determined, so that is NOT being enforced." >&2
+        return 0
+    fi
+    local a
+    for a in ${allowed//,/ }; do
+        [ "${a}" = "${MAD_GPU_ARCH}" ] && { echo "+ ${model} supports ${MAD_GPU_ARCH}"; return 0; }
+    done
+    echo "x ${model} supports only: ${allowed}. These nodes are ${MAD_GPU_ARCH}." >&2
+    echo "  The recipe is specific to its GPU (quantization path, attention kernels," >&2
+    echo "  image build arch), so it would fail late or report wrong numbers here." >&2
+    echo "  Run it on a partition with ${allowed}, or use the model's ${MAD_GPU_ARCH} recipe." >&2
+    return 1
+}

@@ -268,6 +268,30 @@ _has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_
 _has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
 
 echo ""
+echo "=== GPU-arch gate (cluster_require_gpu_arch) ==="
+# Runs on the batch node under both CI paths, so this is where MADENGINE and
+# STANDALONE agree on which GPUs a recipe may use. MAD_GPU_ARCH stands in for the
+# probe. Strict mode, because run_multinode.slurm sources cluster.sh under it.
+_gate() { # detected allowed [extra env]
+  env -i PATH="$PATH" HOME="$HOME" MAD_GPU_ARCH="$1" ${3:+$3} bash -c \
+    'set -euo pipefail; . "$0" >/dev/null; cluster_require_gpu_arch M "$1"' \
+    "$DIR/../common/cluster.sh" "$2" >/dev/null 2>&1
+}
+_gate gfx942 gfx942 && { echo "  PASS  gfx942 recipe on gfx942 runs"; pass=$((pass+1)); } || { echo "  FAIL  gfx942 recipe on gfx942 refused"; fail=$((fail+1)); }
+_gate gfx950 gfx942 && { echo "  FAIL  gfx942 recipe on gfx950 was allowed"; fail=$((fail+1)); } || { echo "  PASS  gfx942 recipe on gfx950 refused"; pass=$((pass+1)); }
+_gate gfx950 "gfx942,gfx950" && { echo "  PASS  multi-arch recipe on gfx950 runs"; pass=$((pass+1)); } || { echo "  FAIL  multi-arch recipe on gfx950 refused"; fail=$((fail+1)); }
+_gate gfx950 "" && { echo "  PASS  unrestricted recipe runs anywhere"; pass=$((pass+1)); } || { echo "  FAIL  unrestricted recipe refused"; fail=$((fail+1)); }
+_gate gfx950 gfx942 GPU_ARCH_CHECK=0 && { echo "  PASS  GPU_ARCH_CHECK=0 bypasses"; pass=$((pass+1)); } || { echo "  FAIL  GPU_ARCH_CHECK=0 did not bypass"; fail=$((fail+1)); }
+_has "$(cat "$SLURM")" 'cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}"' "slurm gates on the recipe's GPU_ARCHS"
+_has "$(cat "$SLURM")" '${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=' "slurm forwards the detected arch for the perf CSV"
+if python3 "$DIR/../common/check_gpu_arch_declarations.py" "$DIR/../.." >/dev/null; then
+  echo "  PASS  card skip_gpu_arch agrees with recipe GPU_ARCHS"; pass=$((pass+1))
+else
+  echo "  FAIL  card skip_gpu_arch disagrees with recipe GPU_ARCHS:"; fail=$((fail+1))
+  python3 "$DIR/../common/check_gpu_arch_declarations.py" "$DIR/../.." | sed 's/^/        /'
+fi
+
+echo ""
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"

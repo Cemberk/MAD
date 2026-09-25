@@ -260,6 +260,9 @@ select_same_rail_nodes
 # Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
 # explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
 # load from one path, so a partial hit fails the run deep into bring-up.
+# Detects the allocation's GPU arch (and enforces GPU_ARCHS when the card sets it),
+# before the weights probe. See cluster_require_gpu_arch in cluster.sh.
+cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
 cluster_resolve_model_path || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"
@@ -490,6 +493,7 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    ${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=$PERF_GPU_ARCH} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
     -e MOONCAKE_REPO_DIR="$MOONCAKE_REPO_DIR" \

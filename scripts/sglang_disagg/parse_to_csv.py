@@ -137,7 +137,9 @@ def _get_run_metadata(pipeline: str = "sglang"):
         'docker_image': os.environ.get('DOCKER_IMAGE_NAME', ''),
         'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
         'launcher': 'slurm_multi',
-        'gpu_architecture': 'gfx942',
+        # The launcher detects the allocation's GPU and forwards it; gfx942 only
+        # when run by hand without it, which is what this used to say unconditionally.
+        'gpu_architecture': os.environ.get('PERF_GPU_ARCH', 'gfx942'),
     }
 
 

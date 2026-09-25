@@ -149,6 +149,10 @@ IPADDRS=$(echo "${IPS[*]}" | tr ' ' ',')
 # Shared with the two disagg launchers via cluster.sh. This launcher used to
 # hardcode the NFS path and never probe, so a colocated run pulled its checkpoint
 # over NFS even on nodes that already held a local copy.
+# The card's GPU_ARCHS names the GPUs this recipe is written for; checked before the
+# weights probe so the wrong GPU costs seconds (cluster_require_gpu_arch, cluster.sh).
+cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
+
 cluster_resolve_model_path || exit 1
 echo "  weights    : ${MODEL_PATH}"
 
@@ -347,6 +351,7 @@ docker run --rm \
     -e MODEL_NAME=$MODEL_NAME \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
+    ${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=$PERF_GPU_ARCH} \
     -e MODEL_PATH=$MODEL_PATH \
     -e SERVE_PORT=$SERVE_PORT \
     -e GPUS_PER_NODE=$GPUS_PER_NODE \

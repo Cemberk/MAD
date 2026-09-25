@@ -276,16 +276,28 @@ yD="${yD:-1}" #-> Number of Decode  NODES (a pool may span >1 node)
 # colocated launcher.
 # Resolve it from the recipe (TP within each EP pool; unset/1 = plain wideEP) so
 # submit-time topology/JIT decisions match the in-container launcher. env/-e still wins.
-if [[ -z "${EP_TP_SIZE:-}" && -n "${MODEL_NAME:-}" && -f "${SCRIPT_DIR}/models.yaml" ]]; then
-  EP_TP_SIZE="$(MODELS_YAML="${SCRIPT_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+#
+# _recipe_env KEY: the value of KEY in this model's models.yaml env: block, or empty.
+# The in-container launcher exports that whole block itself; the few keys below
+# are needed earlier, on the batch node, to size the job and gate it.
+_recipe_env() {
+  [[ -n "${MODEL_NAME:-}" && -f "${SCRIPT_DIR}/models.yaml" ]] || return 0
+  MODELS_YAML="${SCRIPT_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" KEY="$1" python3 - <<'PY'
 import os, yaml
 m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
 cfg = m.get(os.environ["MODEL_NAME"]) or {}
-print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+print((cfg.get("env") or {}).get(os.environ["KEY"], ""))
 PY
-)"
-fi
+}
+[[ -z "${EP_TP_SIZE:-}" ]] && EP_TP_SIZE="$(_recipe_env EP_TP_SIZE)"
 export EP_TP_SIZE="${EP_TP_SIZE:-1}"
+
+# GPU_ARCHS: the architectures this model's recipe is written for (models.yaml).
+# Checked against the allocated nodes before anything expensive happens -- see
+# cluster_require_gpu_arch in cluster.sh. The model card's skip_gpu_arch states the
+# same thing for orchestrators; tests/argv_assert.sh keeps the two consistent.
+[[ -z "${GPU_ARCHS:-}" ]] && GPU_ARCHS="$(_recipe_env GPU_ARCHS)"
+export GPU_ARCHS
 
 # TP-within-EP (EP_TP_SIZE>1) is only valid on the wideEP MoRIIO path. Per-pool sizing is
 # validated in vllm_disagg.sh (EP_TP_SIZE must divide GPUS_PER_NODE). Recommended shape: 2P/2D.
@@ -312,6 +324,9 @@ echo "Total allocated nodes: $TOTAL_NODES"
 echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
 # Function to check model path on all nodes
+
+# Before the weights probe: the wrong GPU should cost seconds, not a checkpoint read.
+cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}" || exit 1
 
 # Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
 # explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
@@ -654,6 +669,7 @@ docker run --rm \
     -e xP=$xP \
     -e yD=$yD \
     -e EP_TP_SIZE=$EP_TP_SIZE \
+    ${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=$PERF_GPU_ARCH} \
     ${GPUS_PER_NODE:+-e GPUS_PER_NODE=$GPUS_PER_NODE} \
     -e USER_NAME=$USER_NAME \
     -e MODEL_NAME=$MODEL_NAME \

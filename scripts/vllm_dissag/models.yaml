@@ -303,6 +303,7 @@ GLM-5.1-FP8:
 #     single requests beyond ~600K tokens. It also skips the boot profiling forward.
 _kimi_k3_recipe_env: &kimi_k3_recipe_env
   EP_TP_SIZE: "2"                       # TP2 x DP8 per pool (see WHY TP2 above)
+  GPU_ARCHS: "gfx942"                   # int4 requant + MLA-off are gfx942 workarounds
   VLLM_USE_V1: "1"
   VLLM_ROCM_USE_AITER: "1"
   VLLM_ROCM_USE_AITER_MOE: "1"
@@ -357,6 +358,9 @@ Kimi-K3:
 _kimik3_recipe_env: &kimik3_recipe_env
   # TP size within each EP pool (TP2xDP8 -> EP16). Unset/1 = plain wideEP.
   EP_TP_SIZE: "2"
+  # MI300X-only: the MoE is requantized to int4 because gfx942 has no scaled-MXFP4
+  # MFMA, and the image is built for gfx942. Native MXFP4 on MI355X is its own recipe.
+  GPU_ARCHS: "gfx942"
   VLLM_USE_V1: "1"
   NCCL_DEBUG: "WARN"
   NCCL_DEBUG_SUBSYS: "INIT,NET"
