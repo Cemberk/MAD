@@ -57,6 +57,7 @@ path).
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
 | `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `docker/pyt_vllm_kimi_k3_mi300x` image; card `pyt_vllm_disagg_mori_kimi-k3` |
 | `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; needs `kimik3-wideep-disagg` image (built in-tree from `docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile`); card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
+| `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | **MI355X gfx950, bring-up (not yet run)**; native MXFP4, TP1×DP16 (`EP_TP_SIZE=1`); `docker/pyt_vllm_kimi_k3_mi355x` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` |
 
 Standalone reference launcher (debug / OCI): the Kimi-K3 disagg recipe in PR#241 (out of tree; not part of this framework-only branch).
 
@@ -85,7 +86,13 @@ directory is found by `cluster_resolve_model_path` (`scripts/common/cluster.sh`)
 candidate whose `config.json` differs between nodes. If the weights live under another directory
 name (e.g. `Kimi-K3`), set `MODEL_WEIGHTS_NAME`; an explicit `MODEL_PATH` skips the probe.
 
-Network settings (RDMA rails, GID index, socket interface) are not part of either Kimi recipe. They
+Each Kimi recipe is written for one GPU and says so in `GPU_ARCHS` (`Kimi-K3`, `Kimi-K3-MXFP4`: gfx942;
+`Kimi-K3-MXFP4-MI355X`: gfx950). The launcher detects the allocated nodes' GPU before loading weights
+and refuses a mismatch (`cluster_require_gpu_arch`, `scripts/common/cluster.sh`); `GPU_ARCH_CHECK=0`
+bypasses it for bring-up. `scripts/common/check_gpu_arch_declarations.py` keeps each card's
+`skip_gpu_arch` in step with its recipe.
+
+Network settings (RDMA rails, GID index, socket interface) are not part of any Kimi recipe. They
 come from `scripts/common/cluster.sh`, which detects the fabric from the adapters present, and from
 `connectors/moriio.env`; export any of them to override.
 

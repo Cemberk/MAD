@@ -102,6 +102,7 @@ VALID_MODELS=( \
     "GLM-5.1-FP8" \
     "Kimi-K3" \
     "Kimi-K3-MXFP4" \
+    "Kimi-K3-MXFP4-MI355X" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -112,6 +113,7 @@ MORI_EP_VALID_MODELS=( \
     "GLM-5.1-FP8" \
     "Kimi-K3" \
     "Kimi-K3-MXFP4" \
+    "Kimi-K3-MXFP4-MI355X" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -198,7 +200,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
 # Kimi-K3 and Kimi-K3-MXFP4 are wideEP-only as well (see their models.yaml blocks).
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" "Kimi-K3-MXFP4-MI355X" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -328,6 +330,12 @@ echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 # Before the weights probe: the wrong GPU should cost seconds, not a checkpoint read.
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}" || exit 1
 cluster_report_rdma_rails
+# MoRI JIT-compiles its EP kernels for MORI_GPU_ARCHS. connectors/moriio.env pins it to
+# gfx942, which on MI355X builds kernels for the wrong GPU. Follow the detected arch
+# unless the submitter set it (the later -e wins in docker run).
+if [ -z "${MORI_GPU_ARCHS:-}" ] && [ -n "${MAD_GPU_ARCH:-}" ]; then
+  CONNECTOR_ENV_ARGS+=" -e MORI_GPU_ARCHS=${MAD_GPU_ARCH}"
+fi
 
 # Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
 # explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks

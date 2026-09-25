@@ -280,6 +280,22 @@ _has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_
 _has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
 
 echo ""
+echo "=== moriio + wideEP (Kimi-K3-MXFP4-MI355X, native MXFP4, 2P/2D TP1xDP16) ==="
+M5="$(_argv_rank moriio 1 mori Kimi-K3-MXFP4-MI355X 0 2 2)"
+_hasadj "$M5" "-tp" "1" "MI355X: -tp 1 (EP_TP_SIZE=1)"
+_hasadj "$M5" "--data-parallel-size" "16" "MI355X: dp_size=16"
+_hasadj "$M5" "--data-parallel-size-local" "8" "MI355X: dp_local=8"
+_hasnot "$M5" "--quantization-config" "MI355X: no int4 requant (native MXFP4 on gfx950)"
+_hasnot "$M5" "moriio_pod_hosts" "MI355X: no pod-hosts at EP_TP_SIZE=1"
+_hasadj "$M5" "--max-num-batched-tokens" "4096" "MI355X: max-num-batched-tokens 4096"
+_has    "$M5" "kimi_k3" "MI355X: kimi_k3 reasoning parser"
+_count  "$M5" "--compilation-config" 1 "MI355X: exactly one --compilation-config"
+M5D="$(_argv_rank moriio 1 mori Kimi-K3-MXFP4-MI355X 2 2 2)"
+_has    "$M5D" '"cudagraph_mode":"PIECEWISE"' "MI355X decode: cudagraph PIECEWISE"
+_has    "$M5D" "mori_low_latency" "MI355X decode: all2all = mori_low_latency"
+_has "$(cat "$SLURM")" 'CONNECTOR_ENV_ARGS+=" -e MORI_GPU_ARCHS=${MAD_GPU_ARCH}"' "slurm: MoRI JIT arch follows the detected GPU"
+
+echo ""
 echo "=== GPU-arch gate (cluster_require_gpu_arch) ==="
 # Runs on the batch node under both CI paths, so this is where MADENGINE and
 # STANDALONE agree on which GPUs a recipe may use. MAD_GPU_ARCH stands in for the
