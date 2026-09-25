@@ -129,7 +129,7 @@ ARG NIC_COMPILATION_ARCH="cx7"
 ARG MORI_REPO=https://github.com/ROCm/mori.git
 # tag v1.2.2
 ARG MORI_REF=fe12a11a7d6c6acd0771b772366ed9ed5e0d3d44
-ENV MORI_GPU_ARCHS=gfx942
+ENV MORI_GPU_ARCHS=${GFX_COMPILATION_ARCH}
 # UMBP needs gRPC headers absent from this base and is unrelated to EP dispatch.
 ENV BUILD_UMBP=OFF BUILD_UMBP_SPDK=OFF
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \

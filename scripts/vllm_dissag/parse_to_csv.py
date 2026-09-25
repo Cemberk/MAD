@@ -126,7 +126,9 @@ def _workload_config_columns():
     """
     import os
     cols = {}
-    tp = os.environ.get('TP_SIZE')
+    # EP_TP_SIZE is the TP degree inside each wideEP DP rank. It says nothing about
+    # the TP path, whose degree lives in the model's tp: flags, so leave it empty there.
+    tp = os.environ.get('EP_TP_SIZE') if os.environ.get('WIDE_EP') == '1' else None
     pp = os.environ.get('PP_SIZE')
     if tp:
         cols['tp'] = tp

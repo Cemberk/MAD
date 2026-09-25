@@ -79,39 +79,59 @@ NNODES="${NNODES:-1}"
 MODEL_NAME="${MODEL_NAME:-}"
 xP="${xP:-1}"
 yD="${yD:-1}"
-echo "[vllm_disagg] topology: xP=${xP} yD=${yD} (total nodes=$((xP + yD))) TP_SIZE=${TP_SIZE:-1}"
+echo "[vllm_disagg] topology: xP=${xP} yD=${yD} (total nodes=$((xP + yD)))"
 IPADDRS="${IPADDRS:-localhost}"
 IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
-
 echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 [[ -n "${NIXL_COOKBOOK_PATH:-}" ]] && ls "${NIXL_COOKBOOK_PATH}"
 
 host_ip=$(hostname -I | awk '{print $1}')
 host_name=$(hostname)
 
+# EP_TP_SIZE (TP within each EP pool; unset/1 = plain wideEP) may be supplied by the
+# recipe env: block, which is exported further below. Resolve it early -- env/-e wins --
+# so the topology math can size per-node DP ranks (TP-within-EP -> fewer ranks/node).
+if [[ -z "${EP_TP_SIZE:-}" && -n "$MODEL_NAME" && -f "${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" ]]; then
+    EP_TP_SIZE="$(MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+PY
+)"
+fi
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
+
 # =============================================================================
 # Topology math
 # =============================================================================
-# TP_SIZE is the tensor-parallel degree WITHIN each DP rank on the wideEP path.
-# Historically this path was TP1 (one DP rank per GPU), so TP_SIZE defaults to 1
-# and every pre-existing model resolves to exactly the old numbers.
+# EP_TP_SIZE is the tensor-parallel degree WITHIN each DP rank on the wideEP path.
+# Historically this path was TP1 (one DP rank per GPU), so it defaults to 1 and
+# every pre-existing model resolves to exactly the old numbers. It is named for
+# this path rather than TP_SIZE on purpose: scripts/common/cluster.sh exports
+# TP_SIZE=GPUS_PER_NODE for the colocated launcher, and reading that here would
+# silently turn every TP1/DP16 wideEP recipe into TP8/DP2.
 #
 # TP>1 is needed when the REPLICATED (non-expert) weights do not fit one GPU:
 # e.g. Kimi-K3 on MI300X has 106.5 GiB of replicated attn + shared-expert weight,
 # so TP1/DP16 would need 190.7 GiB/GPU (> 192 GB HBM once the MoRI heap and KV
 # cache are counted). TP2 halves that to 53.3 GiB/GPU and the model fits.
 #
-#   dp_per_node = GPUS_PER_NODE / TP_SIZE      (DP ranks hosted on one node)
-#   pool DP size = nodes_in_pool * dp_per_node (EP width = pool DP size * TP_SIZE)
+#   dp_per_node = GPUS_PER_NODE / EP_TP_SIZE   (DP ranks hosted on one node)
+#   pool DP size = nodes_in_pool * dp_per_node (EP width = pool DP size * EP_TP_SIZE)
+#
+# Only the wideEP path has DP ranks to size; the TP path takes its degree from
+# the model's tp: flags in models.yaml.
 _GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
-TP_SIZE="${TP_SIZE:-1}"
-if ! [[ "$TP_SIZE" =~ ^[0-9]+$ ]] || [ "$TP_SIZE" -lt 1 ]; then
-    echo "Error: invalid TP_SIZE='${TP_SIZE}' (expected a positive integer)." >&2; exit 1
+if ! [[ "$EP_TP_SIZE" =~ ^[0-9]+$ ]] || [ "$EP_TP_SIZE" -lt 1 ]; then
+    echo "Error: invalid EP_TP_SIZE='${EP_TP_SIZE}' (expected a positive integer)." >&2; exit 1
 fi
-if [ $(( _GPUS_PER_NODE % TP_SIZE )) -ne 0 ]; then
-    echo "Error: TP_SIZE=${TP_SIZE} does not divide GPUS_PER_NODE=${_GPUS_PER_NODE}." >&2; exit 1
+if [ $(( _GPUS_PER_NODE % EP_TP_SIZE )) -ne 0 ]; then
+    echo "Error: EP_TP_SIZE=${EP_TP_SIZE} does not divide GPUS_PER_NODE=${_GPUS_PER_NODE}." >&2; exit 1
 fi
-_DP_PER_NODE=$(( _GPUS_PER_NODE / TP_SIZE ))
+_EP_TP=1
+[[ "${WIDE_EP:-0}" == "1" ]] && _EP_TP="${EP_TP_SIZE}"
+_DP_PER_NODE=$(( _GPUS_PER_NODE / _EP_TP ))
 PREFILL_DP_SIZE=$((xP * _DP_PER_NODE))
 DECODE_DP_SIZE=$((yD * _DP_PER_NODE))
 DP_PARALLEL_SIZE_LOCAL=${_DP_PER_NODE}
@@ -119,7 +139,6 @@ PREFILL_DP_START_RANK=$(( NODE_RANK * _DP_PER_NODE ))
 PREFILL_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' '{print $1}')
 DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _DP_PER_NODE ))
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
-export TP_SIZE
 
 # Peer-pool node IPs, ordered by pod index (= global_dp_rank / dp_per_node).
 # A pool that spans MORE THAN ONE node must advertise every peer node to the KV
@@ -240,6 +259,15 @@ PY
 fi
 export MODEL_CONFIG_PREFILL MODEL_CONFIG_DECODE
 
+# Tokenize models.yaml flag strings without bash eval (JSON in --quantization-config breaks eval).
+_model_config_to_array() {
+    local _mc="$1"
+    local -n _out="$2"
+    _out=()
+    [[ -z "$_mc" ]] && return 0
+    mapfile -t _out < <(python3 -c 'import shlex,sys; print("\n".join(shlex.split(sys.argv[1])))' "$_mc")
+}
+
 # =============================================================================
 # Load parallelism + connector, then initialize
 # =============================================================================
@@ -253,7 +281,7 @@ echo "-----------------------------Printing node specific details --------------
 echo "IPADDRS = ${IPADDRS}"
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "PREFILL_DP_SIZE=${PREFILL_DP_SIZE}  DECODE_DP_SIZE=${DECODE_DP_SIZE}"
-echo "TP_SIZE=${TP_SIZE}  DP_PER_NODE=${DP_PARALLEL_SIZE_LOCAL}  (EP width per pool: prefill=$((PREFILL_DP_SIZE * TP_SIZE)) decode=$((DECODE_DP_SIZE * TP_SIZE)))"
+echo "EP_TP_SIZE=${EP_TP_SIZE}  DP_PER_NODE=${DP_PARALLEL_SIZE_LOCAL}  (EP width per pool: prefill=$((PREFILL_DP_SIZE * _EP_TP)) decode=$((DECODE_DP_SIZE * _EP_TP)))"
 echo "PREFILL_MASTER_ADDR=${PREFILL_MASTER_ADDR}  DECODE_MASTER_ADDR=${DECODE_MASTER_ADDR}"
 [ -n "${PREFILL_POD_HOSTS}" ] && echo "PREFILL_POD_HOSTS=${PREFILL_POD_HOSTS}  DECODE_POD_HOSTS=${DECODE_POD_HOSTS}"
 
