@@ -607,4 +607,11 @@ if [ "${SKIP_BENCHMARK}" != "1" ] && [ ! -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.cs
     echo "ERROR: no perf CSV at ${LOG_PATH}/${SLURM_JOB_ID}/perf.csv; the benchmark produced no parseable results." >&2
     exit 1
 fi
+if [ -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" ]; then
+    _failed="$(cluster_perf_failures "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" || true)"
+    if [ "${_failed:-0}" -gt 0 ] 2>/dev/null; then
+        echo "ERROR: ${_failed} row(s) of ${LOG_PATH}/${SLURM_JOB_ID}/perf.csv are FAILURE; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
+        exit 1
+    fi
+fi
 

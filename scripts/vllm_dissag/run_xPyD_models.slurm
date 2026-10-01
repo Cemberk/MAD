@@ -809,6 +809,11 @@ _PERF_DST="$(pwd)/perf_${MODEL_NAME}.csv"
 if [ -f "$_PERF_SRC" ]; then
     cp "$_PERF_SRC" "$_PERF_DST"
     echo "perf CSV -> ${_PERF_DST} ($(( $(wc -l < "$_PERF_DST") - 1 )) rows)"
+    _failed="$(cluster_perf_failures "$_PERF_SRC" || true)"
+    if [ "${_failed:-0}" -gt 0 ] 2>/dev/null; then
+        echo "ERROR: ${_failed} row(s) of $_PERF_SRC are FAILURE; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
+        exit 1
+    fi
 else
     # Exit non-zero: a run with no parseable results is a failure. Reporting it
     # as success makes madengine record exit_code=0 and collect "0 successful,

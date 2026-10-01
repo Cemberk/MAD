@@ -111,6 +111,18 @@ cluster_expand_nodelist() {
         scontrol show hostnames "$nl"
     fi
 }
+# How many rows of a perf.csv are FAILURE (a stalled cell, lost requests, zero
+# throughput, an errored NIAH length -- see the parsers). The launchers fail the
+# job on any, so a standalone sbatch run reports what madengine reports for the
+# same rows: a run whose server died mid-sweep wrote seven FAILURE rows, its
+# containers exited 0, and the job ended COMPLETED.
+cluster_perf_failures() {
+    python3 - "$1" 2>/dev/null <<'PY' || grep -c ',FAILURE,' "$1" 2>/dev/null
+import csv, sys
+rows = csv.DictReader(open(sys.argv[1], newline=""))
+print(sum(1 for r in rows if (r.get("status") or "").strip().upper() == "FAILURE"))
+PY
+}
 # --------------------------------------------------------------- topology
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 export NNODES="${NNODES:-${SLURM_NNODES:-1}}"
