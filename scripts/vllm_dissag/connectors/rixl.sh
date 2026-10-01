@@ -163,9 +163,11 @@ _rixl_setup_env_deepep() {
     export VLLM_ENGINE_READY_TIMEOUT_S=3600
     export VLLM_NIXL_SIDE_CHANNEL_HOST="${host_ip}"
     export VLLM_NIXL_SIDE_CHANNEL_PORT=5557
-    export GLOO_SOCKET_IFNAME=eth0
-    export NCCL_SOCKET_IFNAME=eth0
-    export NCCL_IB_GID_INDEX=3
+    # The launcher forwards the site's fabric (cluster.sh, or what the caller passed);
+    # these are only the fallbacks, and match it on the cluster this was tuned on.
+    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-eth0}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-eth0}"
+    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-3}"
     export NCCL_CROSS_NIC=1
     export NCCL_NET_GDR_LEVEL=PHB
     export UCX_TLS=rc,sm,self,rocm_copy,rocm_ipc,tcp

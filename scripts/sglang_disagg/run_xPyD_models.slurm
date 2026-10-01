@@ -141,7 +141,38 @@ if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
     echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
     exit 1
 fi
+# Fabric settings the caller passed (card env_vars, madengine, sbatch --export),
+# recorded BEFORE cluster.sh fills in its fallbacks. See SGLANG_FABRIC_ENV_ARGS.
+_FABRIC_VARS="NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAME MORI_RDMA_DEVICES MORI_IB_GID_INDEX MORI_SOCKET_IFNAME IB_DEVICES IBDEVICES RCCL_AINIC_ROCE"
+_FABRIC_PASSED=""
+for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
+
+# The container sets its own fabric defaults (mori_ep_env.sh, set_env_vars.sh),
+# which name one CX7 cluster's NICs and GID 3. Forward into it:
+#   - every fabric value the caller passed, on any cluster, so an override reaches
+#     the container the way it reaches every other launcher;
+#   - on ainic / thor2, also what cluster.sh derived, since the container defaults
+#     are wrong there.
+# On cx7 / unknown, cluster.sh-only values are NOT forwarded: the container keeps
+# the defaults it has always run with on that fabric.
+_FABRIC_FWD="$_FABRIC_PASSED"
+case "${CLUSTER_ARCHETYPE:-}" in ainic|thor2) _FABRIC_FWD="$_FABRIC_VARS" ;; esac
+# IB_DEVICES is what the container hands sglang as --disaggregation-ib-device. A
+# caller or cluster.sh naming the rails as MORI_RDMA_DEVICES means the same NICs.
+if [ -z "${IB_DEVICES:-}" ] && [ -n "${MORI_RDMA_DEVICES:-}" ]; then
+    case " $_FABRIC_FWD " in *" MORI_RDMA_DEVICES "*) export IB_DEVICES="$MORI_RDMA_DEVICES" ;; esac
+fi
+# MoRI reads its own GID index; one fabric has one GID.
+if [ -z "${MORI_IB_GID_INDEX:-}" ] && [ -n "${NCCL_IB_GID_INDEX:-}" ]; then
+    case " $_FABRIC_FWD " in *" NCCL_IB_GID_INDEX "*) export MORI_IB_GID_INDEX="$NCCL_IB_GID_INDEX" ;; esac
+fi
+SGLANG_FABRIC_ENV_ARGS=""
+for _v in $_FABRIC_FWD; do
+    [ -n "${!_v:-}" ] && SGLANG_FABRIC_ENV_ARGS="$SGLANG_FABRIC_ENV_ARGS -e $_v=${!_v}"
+done
+export SGLANG_FABRIC_ENV_ARGS
+echo "[fabric] ${CLUSTER_ARCHETYPE:-unknown}; forwarded to the container:${SGLANG_FABRIC_ENV_ARGS:- none (container defaults)}"
 
 validate_model_name() {
   local is_valid_model=false
@@ -515,6 +546,7 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    ${SGLANG_FABRIC_ENV_ARGS} \
     ${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=$PERF_GPU_ARCH} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
