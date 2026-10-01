@@ -27,8 +27,8 @@ _layout() {
 _resolve() {
     local root="$TMP/$1"; shift
     env -i HOME="$TMP" USER=t PATH="$root/bin:/usr/bin:/bin" \
-        CLUSTER_SYSFS_IB="$root/ib" CLUSTER_SYSFS_NET="$root/net" "$@" bash -c '
-        . "'"$DIR"'/cluster.sh" >/dev/null 2>&1
+        CLUSTER_SYSFS_IB="$root/ib" CLUSTER_SYSFS_NET="$root/net" _CLUSTER_SH="$DIR/cluster.sh" "$@" bash -c '
+        . "$_CLUSTER_SH" >/dev/null 2>&1
         echo "arch=$CLUSTER_ARCHETYPE gid=$NCCL_IB_GID_INDEX if=$NCCL_SOCKET_IFNAME kv=$KV_IB_DEVICE hca=${NCCL_IB_HCA:-} mori=${MORI_RDMA_DEVICES:-}"'
 }
 _is() { [ "$1" = "$2" ] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s\n        got:  %s\n        want: %s\n" "$3" "$1" "$2"; fail=$((fail+1)); }; }
