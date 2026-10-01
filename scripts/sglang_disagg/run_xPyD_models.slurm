@@ -105,7 +105,7 @@ fi
 
 # Set current directory to be REPO directory with all relevant scripts
 export MOONCAKE_REPO_DIR=$(pwd)
-LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
+LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER}/model_blog_logs}"
 
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
@@ -464,6 +464,19 @@ _stop_container() {
     docker rm -f "$DOCKER_CONT_NAME" >/dev/null 2>&1
 }
 trap "_stop_container; exit 143" TERM INT
+# Site storage, bound at the same path inside: shared storage, local NVMe, and
+# MODEL_DIR when it is outside both. All three come from cluster.sh or the caller.
+# Only paths present on this node: docker creates a missing bind source as an empty
+# directory, which would shadow the weights. Evaluated here, on each node.
+_SITE_MOUNTS=""
+for _p in ${SHARED_MOUNT:-/shared_inference} ${NVME_ROOT:-/mnt/m2m_nobackup} ${MODEL_DIR:-}; do
+    [ -d "$_p" ] || continue
+    _covered=0
+    for _m in $_SITE_MOUNTS; do case "$_p/" in "${_m%%:*}"/*) _covered=1 ;; esac; done
+    [ "$_covered" = 1 ] || _SITE_MOUNTS="$_SITE_MOUNTS $_p:$_p"
+done
+_SITE_MOUNTS="$(for _m in $_SITE_MOUNTS; do printf -- " -v %s" "$_m"; done)"
+echo "[mounts] site storage:${_SITE_MOUNTS:- none}"
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -475,8 +488,7 @@ docker run --rm \
     --security-opt seccomp=unconfined \
     --privileged \
     -v $HOME:$HOME \
-    -v /shared_inference:/shared_inference \
-    -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
+    ${_SITE_MOUNTS} \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size 64G \
     -v ${LOG_PATH}:/run_logs \

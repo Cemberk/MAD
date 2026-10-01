@@ -94,7 +94,7 @@ MODEL_NAME="${MODEL_NAME:?set MODEL_NAME (key into scripts/vllm_dissag/models.ya
 # the node list, which is not known until node discovery below.
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 USER_NAME="${USER:-$(id -un)}"
-LOG_PATH="${LOG_PATH:-/shared_inference/${USER_NAME}/model_blog_logs}"
+LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER_NAME}/model_blog_logs}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 SERVE_PORT="${SERVE_PORT:-8000}"
 MASTER_PORT="${MASTER_PORT:-29500}"
@@ -270,9 +270,19 @@ done
 # and every $VAR after that point is expanded by the BATCH shell instead of this
 # one. That is not a syntax error, so bash -n does not see it; it surfaces at run
 # time as "unbound variable" naming a variable that is plainly assigned above.
-NVME_ROOT="${NVME_ROOT:-/mnt/m2m_nobackup}"
-_NVME_MOUNT=""
-[ -d "$NVME_ROOT" ] && _NVME_MOUNT="-v $NVME_ROOT:$NVME_ROOT"
+# Site storage, bound at the same path inside: shared storage, local NVMe, and
+# MODEL_DIR when it is outside both. All three come from cluster.sh or the caller.
+# Only paths present on this node: docker creates a missing bind source as an empty
+# directory, which would shadow the weights. Evaluated here, on each node.
+_SITE_MOUNTS=""
+for _p in ${SHARED_MOUNT:-/shared_inference} ${NVME_ROOT:-/mnt/m2m_nobackup} ${MODEL_DIR:-}; do
+    [ -d "$_p" ] || continue
+    _covered=0
+    for _m in $_SITE_MOUNTS; do case "$_p/" in "${_m%%:*}"/*) _covered=1 ;; esac; done
+    [ "$_covered" = 1 ] || _SITE_MOUNTS="$_SITE_MOUNTS $_p:$_p"
+done
+_SITE_MOUNTS="$(for _m in $_SITE_MOUNTS; do printf -- " -v %s" "$_m"; done)"
+echo "[mounts] site storage:${_SITE_MOUNTS:- none}"
 
 # Host-local compilation cache dirs (ext4, survive container restarts).
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
@@ -293,7 +303,7 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null)
     _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12)
     _IMG_KEY="${_IMG_KEY:-noimg}"
-    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
+    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-${NVME_ROOT:-/mnt/m2m_nobackup}/${USER}/vllm_jit_cache/${_IMG_KEY}}"
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
     # Inline, not cluster_mark_dir: this runs in the srun body, a separate shell on
     # the compute node where cluster.sh was never sourced, so the function is not
@@ -336,8 +346,7 @@ docker run --rm \
     --ulimit nofile=524288:524288 --ulimit memlock=-1:-1 \
     -v $LOG_PATH:/run_logs \
     -v '"$MAD_SCRIPTS_DIR"':$MAD_SCRIPTS_MOUNT \
-    -v /shared_inference:/shared_inference \
-    ${_NVME_MOUNT} \
+    ${_SITE_MOUNTS} \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
     $_JIT_CACHE_MOUNT \
     $_RDMA_MOUNTS \
