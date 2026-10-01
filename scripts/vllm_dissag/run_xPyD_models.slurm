@@ -319,7 +319,7 @@ echo "Looking for model: $MODEL_NAME"
 echo "Checking model availability across all allocated nodes..."
 
 # Get all allocated nodes
-ALL_NODES=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+ALL_NODES=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
 TOTAL_NODES=$(echo "$ALL_NODES" | wc -l)
 
 echo "Total allocated nodes: $TOTAL_NODES"
@@ -374,7 +374,7 @@ echo "SLURM_NNODES: $SLURM_NNODES"
 echo "SLURM_NTASKS: $SLURM_NTASKS"
 
 # Get the full nodelist and extract first NUM_NODES
-FULL_NODELIST=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+FULL_NODELIST=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
 
 # NUM_NODES comes from xP+yD, not from the allocation, so a short allocation used
 # to be truncated by the `head` below into a silently wrong topology: pools would

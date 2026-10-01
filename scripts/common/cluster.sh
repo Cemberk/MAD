@@ -95,6 +95,22 @@ export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
 # hardcoded home only ever works for the one account it names.
 export SLURM_SUBMIT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
 
+# One hostname per line from a SLURM nodelist, compressed or not.
+# Stock SLURM gives the compressed form (node[01-03,05]), which only `scontrol
+# show hostnames` expands. Spur, a SLURM-compatible scheduler, gives the list
+# already expanded (nodeA,nodeB) and has no `scontrol show hostnames` at all, so
+# calling it there returns nothing and every node list built from it is empty.
+# A list with no brackets needs no expanding; only the compressed form goes to
+# scontrol.
+cluster_expand_nodelist() {
+    local nl="${1:-}"
+    [ -n "$nl" ] || return 0
+    if [[ "$nl" != *"["* ]]; then
+        tr ',' '\n' <<<"$nl" | sed '/^$/d'
+    else
+        scontrol show hostnames "$nl"
+    fi
+}
 # --------------------------------------------------------------- topology
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 export NNODES="${NNODES:-${SLURM_NNODES:-1}}"

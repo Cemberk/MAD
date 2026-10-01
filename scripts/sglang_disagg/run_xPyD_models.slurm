@@ -176,7 +176,7 @@ echo "Looking for model: $MODEL_NAME"
 echo "Checking model availability across all allocated nodes..."
 
 # Get all allocated nodes
-ALL_NODES=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+ALL_NODES=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
 TOTAL_NODES=$(echo "$ALL_NODES" | wc -l)
 
 echo "Total allocated nodes: $TOTAL_NODES"
@@ -218,7 +218,7 @@ select_same_rail_nodes() {
             case "$line" in *Level=0*) ;; *) continue ;; esac
             leafname=${line#*SwitchName=}; leafname=${leafname%% *}
             nodelist=${line#*Nodes=};      nodelist=${nodelist%% *}
-            members=$(scontrol show hostnames "$nodelist" 2>/dev/null)
+            members=$(cluster_expand_nodelist "$nodelist" 2>/dev/null)
             if echo "$members" | grep -qx -- "$node"; then
                 leaf="$leafname"
                 break
@@ -282,7 +282,7 @@ echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
 echo "SLURM_NNODES: $SLURM_NNODES"
 echo "SLURM_NTASKS: $SLURM_NTASKS"
 
-FULL_NODELIST=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+FULL_NODELIST=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
 AVAILABLE_COUNT=$(echo "$FULL_NODELIST" | wc -l)
 
 if (( AVAILABLE_COUNT < NUM_NODES )); then

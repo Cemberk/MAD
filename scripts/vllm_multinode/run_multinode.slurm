@@ -130,7 +130,7 @@ fi
 # ------------------------
 # Node discovery: rank-ordered IPs, master = first node
 # ------------------------
-SELECTED_NODES=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n "$NUM_NODES")
+SELECTED_NODES=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST" | head -n "$NUM_NODES")
 SELECTED_NODELIST=$(echo "$SELECTED_NODES" | paste -sd,)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
 MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I' | awk '{print $1}')
