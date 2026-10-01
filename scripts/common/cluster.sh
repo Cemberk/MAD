@@ -137,19 +137,56 @@ export PP_SIZE="${PP_SIZE:-1}"
 #
 # Archetype facts and the confirm-on-node procedure:
 # .claude/skills/mad-slurm-multinode/references/cluster-types.md
+# Where the node lists its RDMA devices and network interfaces. Parameters only so
+# the offline tests can point detection at a fake tree.
+export CLUSTER_SYSFS_IB="${CLUSTER_SYSFS_IB:-/sys/class/infiniband}"
+export CLUSTER_SYSFS_NET="${CLUSTER_SYSFS_NET:-/sys/class/net}"
+
+# Kernel driver behind an RDMA device (ionic, bnxt_en, mlx5_core), or nothing.
+_cluster_ib_driver() {
+    local link
+    link="$(readlink "${CLUSTER_SYSFS_IB}/$1/device/driver" 2>/dev/null)" || return 0
+    basename "$link"
+}
+
+# Everything below is a FALLBACK: it fills only what the run did not pass, and an
+# explicit value always wins. It classifies by device name and by the driver
+# behind it, because the same adapter is named differently per site (AINIC is
+# rdma0..7 on one cluster and ionic_0..7 on another).
 cluster_detect_archetype() {
-    local devs=""
-    if [ -d /sys/class/infiniband ]; then
-        devs="$(ls /sys/class/infiniband 2>/dev/null)"
+    local devs="" drivers="" d
+    if [ -d "${CLUSTER_SYSFS_IB}" ]; then
+        devs="$(ls "${CLUSTER_SYSFS_IB}" 2>/dev/null)"
+        for d in $devs; do drivers="$drivers $(_cluster_ib_driver "$d")"; done
     elif command -v ibv_devices >/dev/null 2>&1; then
         devs="$(ibv_devices 2>/dev/null | awk 'NR>2 {print $1}')"
     fi
-    case "${devs}" in
-        *bnxt_re*) echo thor2 ;;
-        *rdma*)    echo ainic ;;
-        *mlx5*)    echo cx7 ;;
-        *)         echo unknown ;;
+    case "${devs} ${drivers}" in
+        *bnxt_re*|*bnxt_en*) echo thor2 ;;
+        *rdma*|*ionic*)      echo ainic ;;
+        *mlx5*)              echo cx7 ;;
+        *)                   echo unknown ;;
     esac
+}
+
+# RDMA devices on this node whose driver is $1, comma-separated in natural order,
+# or nothing when sysfs cannot say (then the archetype's fixed list is used).
+cluster_rdma_rails() {
+    local d out=""
+    [ -d "${CLUSTER_SYSFS_IB}" ] || return 0
+    for d in $(ls "${CLUSTER_SYSFS_IB}" 2>/dev/null | sort -V); do
+        [ "$(_cluster_ib_driver "$d")" = "$1" ] && out="${out:+$out,}$d"
+    done
+    echo "$out"
+}
+
+# The archetype's usual control interface if this node has it, else the
+# interface of the IPv4 default route, else the usual name unchanged.
+cluster_socket_ifname() {
+    local want="$1" dflt
+    if [ -e "${CLUSTER_SYSFS_NET}/${want}" ]; then echo "$want"; return; fi
+    dflt="$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')"
+    echo "${dflt:-$want}"
 }
 
 export CLUSTER_ARCHETYPE="${CLUSTER_ARCHETYPE:-$(cluster_detect_archetype)}"
@@ -170,8 +207,16 @@ case "${CLUSTER_ARCHETYPE}" in
         ;;
 esac
 
+# The rails as this node names them, for the fabrics whose names vary by site.
+_arch_found_rails=""
+case "${CLUSTER_ARCHETYPE}" in
+    ainic) _arch_found_rails="$(cluster_rdma_rails ionic)" ;;
+    thor2) _arch_found_rails="$(cluster_rdma_rails bnxt_en)" ;;
+esac
+[ -n "${_arch_found_rails}" ] && _arch_kv_nic="${_arch_found_rails%%,*}"
+
 export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-${_arch_gid}}"
-export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${_arch_iface}}"
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-$(cluster_socket_ifname "${_arch_iface}")}"
 export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${NCCL_SOCKET_IFNAME}}"
 export RDMAV_DRIVERS="${RDMAV_DRIVERS:-${_arch_drivers}}"
 export IBV_DRIVERS="${IBV_DRIVERS:-${_arch_drivers}}"
@@ -196,6 +241,7 @@ case "${CLUSTER_ARCHETYPE}" in
     thor2) _arch_rails="bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7" ;;
     *)     _arch_rails="" ;;
 esac
+[ -n "${_arch_found_rails}" ] && _arch_rails="${_arch_found_rails}"
 if [ -n "${_arch_rails}" ]; then
     export NCCL_IB_HCA="${NCCL_IB_HCA:-${_arch_rails}}"
     export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_arch_rails}}"
