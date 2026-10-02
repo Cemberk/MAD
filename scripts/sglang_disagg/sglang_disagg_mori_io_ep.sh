@@ -279,6 +279,18 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS SERVER_
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
+# --prefill-round-robin-balance exists in the sglang these recipes were tuned on
+# (0.5.12) and was removed later: 0.5.20 refuses to start with "unrecognized
+# arguments". Pass it when the installed sglang defines it, read from its
+# server_args.py (no import, so no torch start-up). If that cannot be read, pass
+# it as before.
+_SGL_PRR_FLAG="--prefill-round-robin-balance"
+_sgl_args_py="$(python3 -c 'import importlib.util as u; s = u.find_spec("sglang"); print(s.submodule_search_locations[0] + "/srt/server_args.py")' 2>/dev/null)"
+if [ -f "${_sgl_args_py}" ] && ! grep -q -- "prefill-round-robin-balance" "${_sgl_args_py}"; then
+    _SGL_PRR_FLAG=""
+    echo "[sglang] this sglang has no --prefill-round-robin-balance; launching without it"
+fi
+
 # KV transfer backend: default mori, switchable to mooncake (Mooncake).
 # Kept out of models.yaml so model config is backend-agnostic.
 _TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mori}"
@@ -444,7 +456,7 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
         --model-path ${MODEL_PATH} \
         --disaggregation-mode prefill \
         --load-balance-method ${_prefill_lb_method} \
-        --prefill-round-robin-balance \
+        ${_SGL_PRR_FLAG} \
         --disaggregation-ib-device ${IB_DEVICES} \
         --host ${host_ip} \
         --port 3000 \
@@ -703,7 +715,7 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
         --model-path ${MODEL_PATH} \
         --disaggregation-mode prefill \
         --load-balance-method ${_prefill_lb_method} \
-        --prefill-round-robin-balance \
+        ${_SGL_PRR_FLAG} \
         --disaggregation-ib-device ${IB_DEVICES} \
         --host ${host_ip} \
         --port 3000 \
@@ -793,7 +805,7 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
         --model-path ${MODEL_PATH} \
         --disaggregation-mode decode \
         --load-balance-method ${_decode_lb_method} \
-        --prefill-round-robin-balance \
+        ${_SGL_PRR_FLAG} \
         --disaggregation-ib-device ${IB_DEVICES} \
         --host ${host_ip} \
         --port 3000 \
