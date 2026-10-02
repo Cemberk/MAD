@@ -28,10 +28,16 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
 
     sglang.bench_serving prints "Successful requests" but no failed count, so a cell's failed
     requests are its prompt count minus its successful ones.
+
+    It also counts a request the server aborted as successful, and reports the REQUESTED output
+    length as generated. A run whose KV transfer failed on every request (decode aborted each one)
+    printed 1024 successful requests, 1048576 generated tokens and 155k tok/s -- with
+    "Total generated tokens (retokenized): 0" and "Mean TTFT (ms): 0.00". Those two lines are what
+    show nothing came back, so a cell with either is `empty`, a failure.
     """
     results = defaultdict(lambda: {'concurrency': None, 'input_tokens': None,
                                     'output_tokens': None, 'max_throughput': 0.0,
-                                    'failed': 0, 'no_result': False})
+                                    'failed': 0, 'no_result': False, 'empty': False})
 
     with open(log_file, 'r') as f:
         content = f.read()
@@ -81,6 +87,14 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
         if prompts is not None and successful_match:
             data['failed'] = max(data['failed'], prompts - int(successful_match.group(1)))
 
+        # Requests "succeeded" but no text came back (see the docstring). Each line is optional:
+        # a client that does not print it is judged on the rest, as before.
+        retok = re.search(r'Total generated tokens \(retokenized\):\s+(\d+)', cell)
+        ttft = re.search(r'Mean TTFT \(ms\):\s+([\d.]+)', cell)
+        succeeded = int(successful_match.group(1)) if successful_match else None
+        if succeeded and ((retok and int(retok.group(1)) == 0) or (ttft and float(ttft.group(1)) == 0.0)):
+            data['empty'] = True
+
         # Keep the maximum throughput
         if throughput > data['max_throughput']:
             data['max_throughput'] = throughput
@@ -89,8 +103,10 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
 
 
 def cell_failed(data: Dict) -> bool:
-    """A sweep cell failed if it printed no result, lost any request, or measured no throughput."""
-    return data['no_result'] or data['failed'] > 0 or data['max_throughput'] <= 0
+    """A sweep cell failed if it printed no result, lost any request, measured no throughput,
+    or its requests returned no text."""
+    return (data['no_result'] or data['failed'] > 0 or data['max_throughput'] <= 0
+            or data.get('empty', False))
 
 
 def save_to_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str):
