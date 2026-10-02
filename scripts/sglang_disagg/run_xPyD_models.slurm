@@ -146,6 +146,14 @@ fi
 _FABRIC_VARS="NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAME MORI_RDMA_DEVICES MORI_IB_GID_INDEX MORI_SOCKET_IFNAME IB_DEVICES IBDEVICES RCCL_AINIC_ROCE"
 _FABRIC_PASSED=""
 for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
+# Node shape the container sizes its servers from (sglang_disagg_mori_io_ep.sh:
+# GPUS_PER_NODE, and GENERIC_TP_SIZE in TP mode, both default 8). Like the fabric,
+# these reached the container only as its defaults, so no setting could run the
+# card on nodes with other than 8 GPUs. Forwarded when the caller set them, and
+# only then: cluster.sh defaults GPUS_PER_NODE to 8 below, the container's own
+# default, so a run that sets nothing starts exactly as before.
+_SHAPE_PASSED=""
+for _v in GPUS_PER_NODE GENERIC_TP_SIZE; do [ -n "${!_v:-}" ] && _SHAPE_PASSED="$_SHAPE_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 
 # The container sets its own fabric defaults (mori_ep_env.sh, set_env_vars.sh),
@@ -168,7 +176,7 @@ if [ -z "${MORI_IB_GID_INDEX:-}" ] && [ -n "${NCCL_IB_GID_INDEX:-}" ]; then
     case " $_FABRIC_FWD " in *" NCCL_IB_GID_INDEX "*) export MORI_IB_GID_INDEX="$NCCL_IB_GID_INDEX" ;; esac
 fi
 SGLANG_FABRIC_ENV_ARGS=""
-for _v in $_FABRIC_FWD; do
+for _v in $_FABRIC_FWD $_SHAPE_PASSED; do
     [ -n "${!_v:-}" ] && SGLANG_FABRIC_ENV_ARGS="$SGLANG_FABRIC_ENV_ARGS -e $_v=${!_v}"
 done
 export SGLANG_FABRIC_ENV_ARGS
