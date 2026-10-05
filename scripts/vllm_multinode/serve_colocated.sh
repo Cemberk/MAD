@@ -251,6 +251,10 @@ export xP="${xP:-1}" yD="${yD:-0}"
 #                       (BENCHMARK_SCRIPT=sweep). With BENCHMARK_SCRIPT=niah the CSV
 #                       is narrow and madengine supplies these fields itself.
 export NIAH_MODEL="${MODEL_NAME:-model}"
+# The sweep and long_context benchmarks request the model by this name too (see
+# vllm_dissag/benchmark_xPyD.sh); without it they asked for MODEL_PATH and every
+# request got 404 from a server serving under --served-model-name.
+export SERVED_MODEL_NAME="${MODEL_NAME:-model}"
 _ep_tag="$([ "${ENABLE_EP}" = "1" ] && echo "ep_${ALL2ALL_BACKEND:-default}" || echo "noep")"
 export PERF_DEPLOYMENT_TYPE="${PERF_DEPLOYMENT_TYPE:-colocated_pp${PP_SIZE}xtp${TP_SIZE}}"
 export PERF_TAGS="${PERF_TAGS:-vllm_multinode,colocated,${_ep_tag}}"
