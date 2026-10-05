@@ -175,7 +175,8 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
     container = {
         "name": name,
         "image": image,
-        "imagePullPolicy": k8s.get("image_pull_policy", "IfNotPresent"),
+        # madengine's base default (presets/k8s/defaults.json), so the paths agree when unset.
+        "imagePullPolicy": k8s.get("image_pull_policy", "Always"),
         "command": ["/bin/bash", "-c"],
         "args": ["set -e; mkdir -p /workspace; tar -xzf /mad-k8s-bundle/scripts.tgz -C /workspace; "
                  "exec bash /workspace/.mad-k8s/mad_k8s_node.sh"],
