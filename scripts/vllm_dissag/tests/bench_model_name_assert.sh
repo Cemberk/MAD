@@ -12,6 +12,9 @@ for f in benchmark_xPyD.sh benchmark_long_context.sh; do
     named=$(grep -c -- '--served-model-name "${SERVED_MODEL_NAME:-$MODEL_PATH}"' "$DIR/$f")
     _is "$named" "$calls" "$f: all $calls vllm bench serve calls name the served model"
 done
+for f in benchmark_xPyD.sh benchmark_long_context.sh benchmark_agentic.sh; do
+    _is "$(grep -v '^[[:space:]]*#' "$DIR/$f" | grep -c 'NIXL_COOKBOOK_PATH')" "0" "$f: finds its siblings from its own directory, not NIXL_COOKBOOK_PATH"
+done
 _is "$(grep -c '^export SERVED_MODEL_NAME="${MODEL_NAME:-model}"' "$DIR/../vllm_multinode/serve_colocated.sh")" "1" \
     "serve_colocated.sh exports the name it serves under"
 _is "$(grep -c 'export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${MODEL_PATH}}"' "$DIR/vllm_disagg.sh")" "1" \
