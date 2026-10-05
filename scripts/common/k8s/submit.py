@@ -305,7 +305,7 @@ def collect(kube, built, image, out_dir):
         reader["spec"]["nodeSelector"] = node_sel
     rname = reader["metadata"]["name"]
     kube.run("delete", "pod", rname, "--ignore-not-found", "--wait=true")
-    kube.run("apply", "-f", "-", input=json.dumps(reader))
+    kube.run("create", "-f", "-", input=json.dumps(reader))
     kube.run("wait", "--for=condition=Ready", f"pod/{rname}", "--timeout=300s")
     out_dir.mkdir(parents=True, exist_ok=True)
     pod0 = f"/results/{name}-0"
@@ -378,8 +378,11 @@ def main(argv=None):
 
     for obj in reversed(built["objects"]):
         replace_ours(kube, obj)
+    # create, not apply: apply copies the whole object into a last-applied annotation,
+    # capped at 256 KiB, and the ConfigMap carrying the scripts bundle is larger.
+    # Leftovers of this run's names were deleted above, so there is nothing to merge.
     for obj in built["objects"]:
-        kube.run("apply", "-f", "-", input=json.dumps(obj))
+        kube.run("create", "-f", "-", input=json.dumps(obj))
     print(f"[mad-k8s submit] Job {built['name']} submitted (run {built['run_id']})", flush=True)
 
     deadline = time.time() + (timeout or 0) + 600 if timeout else None

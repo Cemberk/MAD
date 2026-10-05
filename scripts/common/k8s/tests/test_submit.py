@@ -100,3 +100,12 @@ class TestVerdict(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCreateNotApply(unittest.TestCase):
+    def test_objects_are_created_not_applied(self):
+        # kubectl apply stores the whole object in an annotation capped at 256 KiB;
+        # the ConfigMap carrying the scripts bundle is ~300 KB and is rejected.
+        src = SUBMIT.read_text()
+        self.assertNotIn('kube.run("apply"', src)
+        self.assertIn('kube.run("create", "-f", "-"', src)
