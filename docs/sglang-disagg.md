@@ -317,8 +317,12 @@ container. Every value is `${VAR:-default}`.
 it uses `mlx5_1`. The model cards set it explicitly.
 
 The chosen list becomes `IB_DEVICES` (passed to `--disaggregation-ib-device`), `NCCL_IB_HCA` and
-`MORI_RDMA_DEVICES`. The batch script does not forward `IB_DEVICES`, `NCCL_IB_HCA` or
-`MORI_RDMA_DEVICES` into the container, so select the NICs with `USE_CX7_NICS`.
+`MORI_RDMA_DEVICES`. Those are the container's defaults. To use other NICs, pass them: the batch
+script forwards any of `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `NCCL_SOCKET_IFNAME`,
+`GLOO_SOCKET_IFNAME`, `MORI_RDMA_DEVICES`, `MORI_IB_GID_INDEX`, `MORI_SOCKET_IFNAME`, `IB_DEVICES`,
+`IBDEVICES` and `RCCL_AINIC_ROCE` that you set. `IB_DEVICES` follows `MORI_RDMA_DEVICES` and
+`MORI_IB_GID_INDEX` follows `NCCL_IB_GID_INDEX` when only those are given. On an `ainic` or `thor2`
+node it also forwards what `cluster.sh` detected. Its `[fabric]` log line lists what it forwarded.
 
 **Same-rail check.** With `USE_CX7_NICS=1`, a cross-rail node pair makes NCCL time out inside
 `ibv_modify_qp`. Because `base_flags` carry `--watchdog-timeout 1000000`, that timeout is a hang,
@@ -369,9 +373,9 @@ With `DP_MODE=1` it also sets MoRI EP tuning:
 | `SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD` | `2 * MORI_MAX_DISPATCH_TOKENS_DECODE` |
 | `MORI_SHMEM_HEAP_SIZE` | `17179869184` (16 GiB; the 4 GiB default is too small for EP 32 and above) |
 
-Only the names the batch script forwards reach the container from your submit environment. The
-fabric names it forwards are `USE_CX7_NICS`, `NCCL_DEBUG`, `NCCL_DEBUG_SUBSYS` and
-`NCCL_DEBUG_FILE`.
+Only the names the batch script forwards reach the container from your submit environment:
+`USE_CX7_NICS`, `NCCL_DEBUG`, `NCCL_DEBUG_SUBSYS`, `NCCL_DEBUG_FILE`, the fabric names above when
+set, and `GPUS_PER_NODE` / `GENERIC_TP_SIZE` when set.
 
 ## Model weights
 
@@ -402,10 +406,16 @@ first that is present, non-empty and identical on every node. `MODEL_WEIGHTS_NAM
 | `GPU_ARCHS`, `GPU_ARCH_CHECK` | unset, `1` | GPU architecture check |
 | `PERF_GPU_ARCH` | detected arch | Label for results |
 
-Inside the container, the entrypoint also reads `GPUS_PER_NODE` (8), `GENERIC_TP_SIZE` (8),
+Inside the container, the entrypoint also reads `GPUS_PER_NODE` (8) and `GENERIC_TP_SIZE` (8),
+which size the servers; set them for nodes with other than 8 GPUs and the batch script forwards
+them. It reads
 `DIST_INIT_PORT` (5757), `BARRIER_PORT` (4342), `MODELS_YAML`, `ROUTER_READY_TIMEOUT_SECONDS`
 (4000), `ROUTER_POLL_SLEEP_SECONDS` (10), `SEARCH_SIGNAL`, `ROUTER_HTTP_BASE` and `CURL_TEST_MODEL`.
 These use their defaults unless the image or a forwarded name sets them.
+
+`--prefill-round-robin-balance` is passed only to an sglang that defines it (read from its
+`server_args.py`). The 0.5.12 sglang these recipes were tuned on has it; later releases removed it
+and refuse to start with it.
 
 ## Model cards
 

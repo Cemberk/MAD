@@ -200,6 +200,17 @@ Consequences worth knowing:
 
 How to run a card this way is in [multinode-running.md](multinode-running.md).
 
+### On Kubernetes
+
+The same cards run on Kubernetes without changing their launchers. The nodes are pods of an
+Indexed Job (one per node of the card, reachable by hostname through a headless Service), every
+pod runs the card's image, and pod 0 runs the card's `.slurm` script with the `SLURM_*` variables
+a batch script sees. Small stand-ins on `PATH` turn its `srun` into tasks sent to the other pods,
+its `docker run` into the command run in the pod itself, and its `scontrol show hostnames` into
+the list of pods. A card can be submitted this way with madengine (a `k8s` block instead of
+`slurm`) or standalone with [`scripts/common/k8s/submit.py`](../scripts/common/k8s/submit.py),
+the counterpart of `sbatch`. See [multinode-kubernetes.md](multinode-kubernetes.md).
+
 ## Parallelism terms
 
 | Term | Meaning here |

@@ -7,7 +7,7 @@ learning recipes for training, inference and deployment on AMD Instinct GPUs.
 You do not run MAD directly. You run it with **madengine**, a command-line tool from
 [ROCm/madengine](https://github.com/ROCm/madengine). madengine reads the model definitions in this
 repository, builds a Docker image for each model, runs the model's script inside a container (or
-submits it to a SLURM cluster), and writes the results to a CSV file.
+submits it to a SLURM or Kubernetes cluster), and writes the results to a CSV file.
 
 This folder is a guide from first contact to writing your own workloads. Start at step 1 of the
 learning path and stop when you have what you need.
@@ -20,6 +20,7 @@ learning path and stop when you have what you need.
 | Add a model, a Dockerfile or a script | [Adding a model](adding-a-model.md) |
 | Understand multinode inference (disaggregated prefill/decode, colocated) | [Multinode overview](multinode-overview.md) |
 | Run a multinode card on a SLURM cluster | [Running multinode workloads](multinode-running.md) |
+| Run a multinode card on Kubernetes | [Running on Kubernetes](multinode-kubernetes.md) |
 | Change a setting and know which layer wins | [Configuration](configuration.md) |
 | Read or compare benchmark results | [Benchmarks and results](benchmarks-and-results.md) |
 | Look up every knob of one launcher or one model | [vLLM disaggregated](vllm-disagg.md), [SGLang disaggregated](sglang-disagg.md), [Kimi-K3](kimi-k3.md) |
@@ -36,7 +37,8 @@ learning path and stop when you have what you need.
    [multinode-overview.md](multinode-overview.md)
 4. **Run a multinode workload.** Prerequisites, running a card through madengine, `sbatch` or
    `salloc`, reading logs and results, and fixing failures.
-   [multinode-running.md](multinode-running.md)
+   [multinode-running.md](multinode-running.md). On Kubernetes, the same cards run with their
+   launchers unchanged: [multinode-kubernetes.md](multinode-kubernetes.md)
 5. **Configure.** Every configuration layer, its precedence, and where to change a given setting.
    [configuration.md](configuration.md)
 6. **Benchmark and read results.** Throughput sweeps, needle-in-a-haystack (NIAH), agentic replay,
@@ -54,6 +56,7 @@ learning path and stop when you have what you need.
 | [adding-a-model.md](adding-a-model.md) | Every model-card field, Dockerfile resolution, the GPU architecture build argument, run scripts, the performance reporting contract, and multinode cards. |
 | [multinode-overview.md](multinode-overview.md) | Concepts: disaggregated prefill/decode versus colocated multinode, launchers, KV connectors, EP backends, topology, architecture diagrams. |
 | [multinode-running.md](multinode-running.md) | Running a multinode card through madengine, `sbatch` or `salloc`; logs, results, failure modes, troubleshooting and offline checks. |
+| [multinode-kubernetes.md](multinode-kubernetes.md) | Running the same cards on Kubernetes, standalone (`scripts/common/k8s/submit.py`) or through madengine: how a card maps onto pods, what the cluster must provide (GPUs, storage, RDMA), the shared configuration file, results and troubleshooting. |
 | [configuration.md](configuration.md) | Every configuration layer and its precedence, `models.yaml` recipes, connector environment, `cluster.sh`, madengine presets and `--additional-context` keys, `mad-config.yaml`. |
 | [benchmarks-and-results.md](benchmarks-and-results.md) | Throughput sweep, NIAH, agentic replay, the `perf.csv` schema and status semantics. |
 | [vllm-disagg.md](vllm-disagg.md) | Full reference for [`scripts/vllm_dissag`](../scripts/vllm_dissag). |
@@ -96,7 +99,7 @@ Terms are listed in the order you meet them.
 | **Tag** | A label in a card's `tags` list, such as `pyt`, `vllm` or `inference`. `madengine run --tags X` selects every card whose name or tags match `X`. See [getting-started.md](getting-started.md#selecting-models-with-tags). |
 | **Recipe** | The per-model serving flags and environment for a multinode workload, kept apart from the card. For vLLM disaggregated serving it is the model's entry in [`scripts/vllm_dissag/models.yaml`](../scripts/vllm_dissag/models.yaml); SGLang has [`scripts/sglang_disagg/models.yaml`](../scripts/sglang_disagg/models.yaml). See [configuration.md](configuration.md). |
 | **Launcher** | Two related meanings. (1) The batch script a multinode card runs, for example `run_xPyD_models.slurm` or `run_multinode.slurm`. (2) The value of a card's `distributed.launcher`, which tells madengine how to start the workload (`torchrun`, `vllm`, `sglang`, `slurm_multi` and others). |
-| **slurm_multi** | The madengine launcher used by every MAD multinode inference card. madengine writes a wrapper SBATCH script that exports the card's `env_vars`, then runs the card's own `.slurm` script on the head node. That script starts the per-node Docker containers itself with `srun`. The hyphenated `slurm-multi` is accepted as an alias. |
+| **slurm_multi** | The madengine launcher used by every MAD multinode inference card. madengine writes a wrapper SBATCH script that exports the card's `env_vars`, then runs the card's own `.slurm` script on the head node. That script starts the per-node Docker containers itself with `srun`. The hyphenated `slurm-multi` is accepted as an alias. On Kubernetes the same script runs unchanged on pod 0 of an Indexed Job, with stand-ins for `srun` and `docker`; see [multinode-kubernetes.md](multinode-kubernetes.md). |
 | **Connector** | In disaggregated serving, the component that moves the KV cache from the prefill server to the decode server. vLLM uses `rixl` (NixlConnector) or `moriio` (MoRIIOConnector). SGLang uses MoRI IO or Mooncake as its transfer backend. See [multinode-overview.md](multinode-overview.md). |
 | **EP backend** | The all-to-all communication library used for wide expert parallelism (wideEP) in mixture-of-experts models: `mori` (MoRI-EP) or `deepep` (DeepEP). In vLLM each connector pairs with its own backend: `moriio` with `mori`, `rixl` with `deepep`. |
 | **xP/yD** | The shape of a disaggregated run: `xP` prefill nodes and `yD` decode nodes. The job needs `xP + yD` nodes. For example `1P/1D` is 2 nodes. |

@@ -436,15 +436,23 @@ holding a different variant, is a hard failure with a message saying what to fix
 
 ### Fabric
 
-The fabric family, `CLUSTER_ARCHETYPE`, is detected from the RDMA adapters present
-(`/sys/class/infiniband`, else `ibv_devices`). Set it to override detection, or set any single
-variable below; an explicit value always wins over the archetype.
+The fabric is a site fact, and the way to state it is to pass it: `env_vars` through madengine,
+exported variables under `sbatch`. Any value below that you set wins, and reaches the containers
+of every launcher.
+
+What you do not set is filled in by detection, a fallback. `CLUSTER_ARCHETYPE` is detected from
+the RDMA devices present (`CLUSTER_SYSFS_IB`, default `/sys/class/infiniband`, else
+`ibv_devices`), by name and by each device's kernel driver (`ionic`, `bnxt_en`, `mlx5_core`): the
+same adapter is `rdma0..7` on one site and `ionic_0..7` on another. On `ainic` and `thor2` the
+rails are the devices the node has with that driver, and the KV NIC is the first of them. The
+socket interface is the archetype's usual name if the node has it (`CLUSTER_SYSFS_NET`), else the
+interface of the IPv4 default route.
 
 | Archetype | Adapter | Devices | `NCCL_IB_GID_INDEX` | `NCCL_SOCKET_IFNAME` | `RDMAV_DRIVERS` | `KV_IB_DEVICE` |
 |---|---|---|---|---|---|---|
 | `cx7` | Mellanox CX7 / RoCE | `mlx5_*` | `3` | `eth0` | `mlx5` | `mlx5_1` |
-| `ainic` | AMD AINIC / Pollara | `rdma0..7` | `1` | `eno0` | `ionic` | `rdma0` |
-| `thor2` | Broadcom Thor2 / RoCE | `bnxt_re0..7` | `3` | `fenic0` | `bnxt_re` | `bnxt_re0` |
+| `ainic` | AMD AINIC / Pollara | `rdma0..7` or `ionic_*` (from the node) | `1` | `eno0` | `ionic` | first rail |
+| `thor2` | Broadcom Thor2 / RoCE | `bnxt_re0..7` (from the node) | `3` | `fenic0` | `bnxt_re` | first rail |
 | `unknown` | anything else | | same as `cx7` | | | |
 
 Why detect rather than hardcode: getting the GID index, driver or interface wrong does not fail
@@ -458,12 +466,33 @@ Other fabric variables:
 | `GLOO_SOCKET_IFNAME` | `${NCCL_SOCKET_IFNAME}` | |
 | `IBV_DRIVERS` | archetype driver | |
 | `RCCL_AINIC_ROCE` | `1` on `ainic` | Without it the AINIC path falls back to verbs or sockets silently |
-| `NCCL_IB_HCA`, `MORI_RDMA_DEVICES` | `rdma0..rdma7` on `ainic`, `bnxt_re0..7` on `thor2`, unset on `cx7` | The RDMA rails. On `cx7` each connector keeps its own choice (`rixl.sh` probes `ibstat`, which a preset `NCCL_IB_HCA` would switch off) |
+| `NCCL_IB_HCA`, `MORI_RDMA_DEVICES` | the node's rails on `ainic` / `thor2`, unset on `cx7` | The RDMA rails. On `cx7` each connector keeps its own choice (`rixl.sh` probes `ibstat`, which a preset `NCCL_IB_HCA` would switch off) |
 | `USE_CX7_NICS` | `0` | `1` selects the 8 CX7 rail NICs for KV transfer; `0` keeps KV on the management NIC, which is cross-rail safe but a fraction of the bandwidth. Rail NICs require nodes on one rail. Meaningful on `cx7` only |
 | `FABRIC_SUBNET_PREFIX` | `10.158.` | Preferred subnet when the SGLang launcher picks each node's IP from `hostname -I`. If no address matches, it uses the first address |
 
 `cluster_report_rdma_rails` prints the rails a job will use and warns about any that is absent or
 not `ACTIVE`. It changes nothing; it makes a wrong rail list visible in the log.
+
+How these reach the containers: the vLLM launchers pass the fabric variables with `-e`. The
+SGLang launcher forwards every fabric variable the caller passed, and on `ainic` / `thor2` also
+what `cluster.sh` derived; on `cx7` it forwards only what was passed, so the container keeps the
+defaults it was tuned with (`mori_ep_env.sh`). It prints what it forwarded on its `[fabric]` line.
+The colocated launcher forwards the names listed in `COLOCATED_FORWARD_ENV`.
+
+### Storage the containers see
+
+The launchers bind `SHARED_MOUNT`, `NVME_ROOT` and `MODEL_DIR` into every container at the same
+path, each only if it exists on the node (Docker would turn a missing bind source into an empty
+directory that shadows it), and `MODEL_DIR` only when it is outside the other two. Their
+`[mounts]` line shows what was bound. A site whose storage is elsewhere sets these two names; the
+`LOG_PATH` and JIT-cache defaults follow them.
+
+### Helpers the launchers use
+
+| Function | What it does |
+|---|---|
+| `cluster_expand_nodelist LIST` | One hostname per line. A list without brackets (as SLURM-compatible schedulers such as Spur give it) is split on commas; only the compressed form (`node[01-03]`) goes to `scontrol show hostnames` |
+| `cluster_perf_failures CSV` | The number of `FAILURE` rows in a `perf.csv`. The launchers fail the job on any |
 
 ### Ports, timeouts, container
 

@@ -37,6 +37,10 @@ allocation and the same environment:
 - **With `sbatch` directly**, exporting the card's environment and submitting its
   launcher yourself.
 
+On Kubernetes the same two ways exist, madengine with a `k8s` block or the standalone
+[`scripts/common/k8s/submit.py`](../scripts/common/k8s/submit.py), and the launcher runs
+unchanged; see [multinode-kubernetes.md](multinode-kubernetes.md).
+
 Both work because the launchers speak only environment variables.
 [`scripts/common/cluster.sh`](../scripts/common/cluster.sh) fills in whatever neither
 path set, so a card runs the same either way.
@@ -210,18 +214,24 @@ The card's `skip_gpu_arch` says the same thing to madengine before an allocation
 ## Fabric
 
 Network settings (RDMA rails, GID index, socket interface) are not part of any recipe.
-They come from `cluster.sh`, which detects the fabric from the adapters present, and
-from the connector `.env` files. Export any of them to override.
+They are site facts. Pass them as parameters: `env_vars` through madengine, exported
+variables under `sbatch`. Whatever you pass reaches every container, on every launcher.
+What you do not pass, `cluster.sh` fills in by detecting the fabric from the node's RDMA
+devices; that detection is a fallback, never a replacement for a value you set.
 
 | `CLUSTER_ARCHETYPE` | Adapter | RDMA devices | `NCCL_IB_GID_INDEX` | `NCCL_SOCKET_IFNAME` |
 |---|---|---|---|---|
 | `cx7` | Mellanox CX7 / RoCE | `mlx5_*` | 3 | `eth0` |
-| `ainic` | AMD AINIC / Pollara | `rdma0..7` | 1 | `eno0` |
+| `ainic` | AMD AINIC / Pollara | `rdma0..7` or `ionic_*`, read from the node | 1 | `eno0` |
 | `thor2` | Broadcom Thor2 / RoCE | `bnxt_re0..7` | 3 | `fenic0` |
 
-An unrecognised node gets the `cx7` values. On `ainic` and `thor2`, `NCCL_IB_HCA` and
-`MORI_RDMA_DEVICES` default to the archetype's eight rails; on `cx7` each connector
-keeps its own choice. `ainic` also sets `RCCL_AINIC_ROCE=1`, without which that path
+Detection reads each RDMA device's kernel driver as well as its name (`ionic`,
+`bnxt_en`, `mlx5_core`), so the same adapter named differently per site is classified
+the same. An unrecognised node gets the `cx7` values. On `ainic` and `thor2`,
+`NCCL_IB_HCA` and `MORI_RDMA_DEVICES` default to the rails the node has for that driver
+(`rdma0..7` on one site, `ionic_0..7` on another); on `cx7` each connector keeps its own
+choice. The socket interface is the archetype's usual name if the node has it, else the
+interface of the IPv4 default route. `ainic` also sets `RCCL_AINIC_ROCE=1`, without which that path
 falls back to verbs or sockets silently.
 
 A wrong fabric setting does not fail loudly: RCCL initialises zero NICs and falls back

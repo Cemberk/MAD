@@ -177,7 +177,9 @@ request returns 404 and the whole run records nothing useful. The launchers hand
 - **vLLM colocated:** the server gets `--served-model-name "$MODEL_NAME"`, and the
   launcher exports `NIAH_MODEL` to match.
 - `benchmark_niah.sh` then uses `NIAH_MODEL` if set, else `SERVED_MODEL_NAME`, else
-  `MODEL_PATH`.
+  `MODEL_PATH`. The sweep and long-context benchmarks pass `--served-model-name
+  "${SERVED_MODEL_NAME:-$MODEL_PATH}"` to `vllm bench serve` (the colocated launcher exports
+  `SERVED_MODEL_NAME=$MODEL_NAME`), so every request names the served model.
 
 Before scoring, `benchmark_niah.sh` polls the router's `/v1/models` every 5 seconds
 for up to 300 seconds, and proceeds with a warning if it never answers (the warmup
@@ -564,12 +566,15 @@ rest, each size should reach the score you expect, with no `TRUNCATED`. For agen
 
 A run counts as passing when all of these hold:
 
-- The SLURM job exits 0. The launchers exit non-zero when a server fails to start,
-  when any node aborts the job, or when no `perf.csv` was produced.
+- The job exits 0. The launchers exit non-zero when a server fails to start, when any
+  node aborts the job, when no `perf.csv` was produced, or when any of its rows is a
+  `FAILURE`, so a standalone `sbatch` run and madengine agree on the verdict.
 - `perf.csv` has the rows you expect: one per sweep cell, one per NIAH size, or the
   agentic metrics per workload.
 - Every row's `status` is `SUCCESS`. For the sweep that means no cell stalled, printed no
-  result, lost a request, or measured zero throughput. For NIAH it means no request at any
+  result, lost a request, or measured zero throughput; for the SGLang sweep also that the
+  requests returned text (a cell whose `Total generated tokens (retokenized)` is 0 or whose
+  mean TTFT is 0 ms counted aborted requests as successful). For NIAH it means no request at any
   size timed out or errored. For agentic it means the error rate is within
   `AGENTIC_MAX_ERROR_RATE`.
 - The numbers are in the range the recipe was validated at, on a shape and GPU its
