@@ -1,11 +1,17 @@
 #!/bin/bash
 # Thin shim: runs the shared scripts/common/benchmark_agentic.sh --backend vllm,
 # then publishes the aggregate JSON as the perf.csv madengine collects.
+# This script's own directory: where parse_to_csv.py (and ../common) live. The
+# disagg launcher mounts it as NIXL_COOKBOOK_PATH, but the colocated launcher
+# (vllm_multinode) runs it from the same directory without setting that, and
+# "$NIXL_COOKBOOK_PATH/parse_to_csv.py" became "/parse_to_csv.py": a sweep whose
+# every cell succeeded published no perf.csv.
+_BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -uo pipefail
 _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for _cand in \
     "${_here}/../common/benchmark_agentic.sh" \
-    "${NIXL_COOKBOOK_PATH:-}/../common/benchmark_agentic.sh" \
+    "$_BENCH_DIR/../common/benchmark_agentic.sh" \
     "${NIXL_REPO_DIR:-}/../common/benchmark_agentic.sh" "${AGENTIC_LIB:+$(dirname "$AGENTIC_LIB")/benchmark_agentic.sh}"; do
     if [ -n "$_cand" ] && [ -f "$_cand" ]; then
         bash "$_cand" --backend vllm "$@"; _rc=$?

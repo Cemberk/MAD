@@ -81,7 +81,7 @@ import csv
 for r in csv.DictReader(open('$TMP/lc_perf.csv')): print(r['status'], r['performance'], r['metric'])")"
 _has    "$LROWS" "SUCCESS 123.45 tok/s (isl=1024 osl=1024 con=1)"  "a long_context cell is read from its isl=/osl=/con= header"
 _has    "$LROWS" "FAILURE 0.00 tok/s (isl=1024 osl=1024 con=4)"    "a stalled long_context cell is a FAILURE row"
-_has    "$(grep -c 'NIXL_COOKBOOK_PATH/parse_to_csv.py' "$DIR/benchmark_long_context.sh")" "1" \
+_has    "$(grep -c '"$_BENCH_DIR/parse_to_csv.py"' "$DIR/benchmark_long_context.sh")" "1" \
         "benchmark_long_context.sh publishes perf.csv"
 
 echo "=== parse_to_csv --niah: one row per context length, errors are FAILURE ==="

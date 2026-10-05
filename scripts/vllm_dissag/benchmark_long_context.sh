@@ -20,6 +20,12 @@
 #   NUM_PROMPTS_FACTOR       measured prompts = factor*con (default 4, min 16)
 #   STEP_TIMEOUT             base timeout (s), scaled by tokens (default 2400)
 # =============================================================================
+# This script's own directory: where parse_to_csv.py (and ../common) live. The
+# disagg launcher mounts it as NIXL_COOKBOOK_PATH, but the colocated launcher
+# (vllm_multinode) runs it from the same directory without setting that, and
+# "$NIXL_COOKBOOK_PATH/parse_to_csv.py" became "/parse_to_csv.py": a sweep whose
+# every cell succeeded published no perf.csv.
+_BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 timestamp=$(date "+%Y%m%d_%H%M%S")
 BENCHMARK_PORT="${BENCHMARK_PORT:-2584}"
@@ -84,7 +90,7 @@ echo "==== Long-context benchmark complete ====" | tee -a "${LOG}_CONCURRENCY.lo
 # run always ended "no perf CSV" in run_xPyD_models.slurm and failed, however it went. The
 # parser reads this harness's "[RUNNING] isl=... con=..." cells; a cell that stalled or
 # printed no result is a FAILURE row.
-python3 "$NIXL_COOKBOOK_PATH/parse_to_csv.py" "${LOG}_CONCURRENCY.log" -o "${LOG}_CONCURRENCY.csv" \
+python3 "$_BENCH_DIR/parse_to_csv.py" "${LOG}_CONCURRENCY.log" -o "${LOG}_CONCURRENCY.csv" \
     --perf-csv "/run_logs/${SLURM_JOB_ID}/perf.csv" \
     --model-name "${MODEL_NAME}" \
     2>&1 | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
