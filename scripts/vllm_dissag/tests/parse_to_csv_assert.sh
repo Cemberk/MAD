@@ -10,6 +10,8 @@
 #   - a cell that printed no result at all (a crashed benchmark, no [STALL]) is a FAILURE row
 #   - NIAH: a length with any timed-out or errored request, or NO-RESULT, is a FAILURE row
 #   - benchmark_long_context.sh's "[RUNNING] isl=... con=..." cells parse, and it publishes perf.csv
+#   - PERF_LATENCY_METRICS=1: per-cell latency/per-node/per-user rows from the best iteration,
+#     KV-bounded max batch from the decode logs; without it the rows are unchanged
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -101,6 +103,56 @@ _has    "$NROWS" "FAILURE 9.5 retrieval/10 (niah words=50000 seeds=2)"   "a leng
 _has    "$NROWS" "SUCCESS 7.0 retrieval/10 (niah words=100000 seeds=3)"  "a low (or truncated) score is a measurement, SUCCESS"
 _has    "$NROWS" "FAILURE 0.0 retrieval/10 (niah words=200000 seeds=3)"  "a NO-RESULT length is a FAILURE row, not a missing row"
 _has    "$(wc -l <<<"$NROWS" | tr -d ' ')" "4"                          "one NIAH row per length"
+
+echo ""
+echo "=== parse_to_csv: PERF_LATENCY_METRICS rows ==="
+_lcell() { # con throughput ttft tpot itl
+  cat <<EOF
+[RUNNING] prompts $(( $1 * 10 )) isl 4096 osl 4096 con $1 (timeout 7200s)
+============ Serving Benchmark Result ============
+Successful requests:                     $(( $1 * 10 ))
+Failed requests:                         0
+Output token throughput (tok/s):         $(( ${2%.*} / 2 )).00
+Total token throughput (tok/s):          $2
+---------------Time to First Token----------------
+Mean TTFT (ms):                          999.00
+Median TTFT (ms):                        $3
+-----Time per Output Token (excl. 1st token)------
+Median TPOT (ms):                        $4
+---------------Inter-token Latency----------------
+Median ITL (ms):                         $5
+==================================================
+EOF
+}
+{
+  echo "Running the benchserving script for iter: 1"
+  _lcell 8 400.00 700.00 50.00 51.00
+  echo "Running the benchserving script for iter: 2"
+  _lcell 8 500.00 600.00 40.00 41.00
+} > "$TMP/lat_CONCURRENCY.log"
+# Two decode nodes x two DP engines; one also logs an unrelated line.
+printf '(EngineCore_DP0) INFO GPU KV cache size: 100,000 tokens\n(EngineCore_DP1) INFO GPU KV cache size: 100,000 tokens\n' > "$TMP/decode_NODE1.log"
+printf 'INFO Maximum concurrency for 163,840 tokens per request\n(EngineCore_DP2) INFO GPU KV cache size: 50,000 tokens\n(EngineCore_DP3) INFO GPU KV cache size: 50,000 tokens\n' > "$TMP/decode_NODE2.log"
+PERF_LATENCY_METRICS=1 xP=1 yD=1 NNODES=2 python3 "$DIR/parse_to_csv.py" "$TMP/lat_CONCURRENCY.log" -o "$TMP/lat.csv" \
+  --perf-csv "$TMP/latperf.csv" --model-name M --kv-logs "$TMP"/decode_NODE*.log >/dev/null 2>&1
+LROWS="$(python3 -c "
+import csv
+for r in csv.DictReader(open('$TMP/latperf.csv')): print(r['status'], r['performance'], r['metric'])")"
+_has "$LROWS" "SUCCESS 500.00 tok/s (isl=4096 osl=4096 con=8)"          "throughput row unchanged (max over iterations)"
+_has "$LROWS" "SUCCESS 250.00 tok/s/node (isl=4096 osl=4096 con=8)"     "per-node throughput = total / NNODES"
+_has "$LROWS" "SUCCESS 250.00 tok/s output (isl=4096 osl=4096 con=8)"   "output throughput of the best iteration"
+_has "$LROWS" "SUCCESS 25.00 tok/s/user 1000/TPOT p50 (isl=4096 osl=4096 con=8)" "per-user throughput = 1000 / median TPOT"
+_has "$LROWS" "SUCCESS 600.00 ms TTFT p50 (isl=4096 osl=4096 con=8)"    "TTFT p50 from the best iteration, not the first"
+_has "$LROWS" "SUCCESS 41.00 ms ITL p50 (isl=4096 osl=4096 con=8)"      "ITL p50 from the best iteration"
+_has "$LROWS" "SUCCESS 36 requests KV-bounded max batch (isl=4096 osl=4096; 4 decode engine(s), 300000 KV tokens)" \
+     "KV-bounded max batch sums floor(engine tokens / (isl+osl)) over engines"
+PERF_LATENCY_METRICS=1 xP=1 yD=1 NNODES=2 python3 "$DIR/parse_to_csv.py" "$TMP/lat_CONCURRENCY.log" -o "$TMP/lat.csv" \
+  --perf-csv "$TMP/latperf2.csv" --model-name M --kv-logs "$TMP/missing_decode_NODE*.log" >/dev/null 2>&1
+_hasnot "$(cat "$TMP/latperf2.csv")" "KV-bounded" "no decode logs: no KV row, and the parse still succeeds"
+python3 "$DIR/parse_to_csv.py" "$TMP/lat_CONCURRENCY.log" -o "$TMP/lat.csv" \
+  --perf-csv "$TMP/latperf3.csv" --model-name M --kv-logs "$TMP"/decode_NODE*.log >/dev/null 2>&1
+_has "$(python3 -c "import csv; print(sum(1 for _ in csv.DictReader(open('$TMP/latperf3.csv'))))")" "1" \
+     "without PERF_LATENCY_METRICS the perf.csv keeps one row per cell"
 
 echo "======================================================"
 echo "  parse_to_csv_assert: ${pass} passed, ${fail} failed"

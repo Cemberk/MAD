@@ -40,9 +40,10 @@ neither → combo 1.
 
 Use these exact `MODEL_NAME` values (defined in `models.yaml` + the slurm allowlists).
 The **Combos** column lists which of the 4 valid combos above each model may run in; the
-slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek family and
-`GLM-5.1-FP8` are **wideEP-only** (TP is rejected — their recipes need the wideEP serve
-path).
+slurm gate rejects any other pairing. Dense models are TP-only; `GLM-5.1-FP8` and the
+Kimi-K3 models are **wideEP-only** (TP is rejected — their recipes need the wideEP serve
+path). The DeepSeek family is wideEP plus moriio+TP (`MORIIO_TP_MODELS`), the TP baseline
+(card `pyt_vllm_disagg_mori_tp_deepseek-v3`).
 
 | Model | Type | Combos (by #) | Notes |
 |-------|------|---------------|-------|
@@ -51,9 +52,9 @@ path).
 | `Qwen3-32B` | dense | 1, 2 (TP) | validated serving (MoRIIO + TP) |
 | `gpt-oss-120b` | MoE | 1, 2 (TP) | |
 | `Qwen3-30B-A3B` | MoE | 1, 2 (TP) | needs a co-versioned AITER image (see Caveats) |
-| `DeepSeek-V3` | MoE | 3, 4 (wideEP only) | validated serving (moriio+MoRI-EP) |
-| `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
-| `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
+| `DeepSeek-V3` | MoE | 2 (moriio TP), 3, 4 | validated serving (moriio+MoRI-EP) |
+| `DeepSeek-V3-5layer` | MoE | 2 (moriio TP), 3, 4 | smoke/dev variant |
+| `DeepSeek-R1` | MoE | 2 (moriio TP), 3, 4 | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
 | `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `docker/vllm_kimi_k3` image; card `pyt_vllm_disagg_mori_kimi-k3` |
 | `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; `docker/vllm_kimi_k3` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
@@ -285,6 +286,8 @@ where those transports are validated (e.g. develop's `vllm_disagg_inference` for
 |----------|---------|-------------|
 | `BENCHMARK_ITR` | `1` | iterations |
 | `BENCHMARK_CON` | `8 16 32 64 128 256 512` | concurrency levels |
+| `BENCHMARK_PROMPTS_PER_CON` / `BENCHMARK_MIN_PROMPTS` | `2` / `16` | prompts per cell = concurrency x the first, at least the second |
+| `PERF_LATENCY_METRICS` | unset | `1` adds latency, per-node, per-user and KV-bounded max batch rows to perf.csv |
 | `BENCHMARK_COMBINATIONS` | `1024/1024 8192/1024 1024/8192` | ISL/OSL pairs |
 
 Parse a results log:

@@ -76,9 +76,12 @@ for i in $(seq 1 $BENCHMARK_ITR); do
                2>&1 | tee -a ${LOG}_SHAPEWARMUP.log >/dev/null
        fi
        for con in $CON; do
-           p_con=$(($con * 2))
-           if [ "$p_con" -lt 16 ]; then
-               p_con=16
+           # Prompts per cell: con x BENCHMARK_PROMPTS_PER_CON (default 2), at least
+           # BENCHMARK_MIN_PROMPTS (default 16). Raise the multiplier to hold each
+           # concurrency at steady state for more waves of requests.
+           p_con=$(( con * ${BENCHMARK_PROMPTS_PER_CON:-2} ))
+           if [ "$p_con" -lt "${BENCHMARK_MIN_PROMPTS:-16}" ]; then
+               p_con=${BENCHMARK_MIN_PROMPTS:-16}
            fi
            _base_timeout="${STEP_TIMEOUT:-1800}"
            _total_tok=$(( isl + osl ))
@@ -116,4 +119,5 @@ done
 python3 "$_BENCH_DIR/parse_to_csv.py" ${LOG}_CONCURRENCY.log -o ${LOG}_CONCURRENCY.csv \
 	--perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv \
 	--model-name "${MODEL_NAME}" \
+	--kv-logs /run_logs/${SLURM_JOB_ID}/decode_NODE*.log \
 	2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null

@@ -172,30 +172,50 @@ _deepseek_recipe_env: &deepseek_recipe_env
   DECODE_MORI_BACKEND: "mori_low_latency"
   MORI_SHMEM_HEAP_SIZE: "17179869184"
 
-# DeepSeek family is wideEP-only (gated in run_xPyD_models.slurm: TP mode is rejected).
-# The dp: blocks are empty because the moriio(mori) connector emits the validated
-# wideEP serve flags (block-size, kv-cache-*, all2all, cudagraph) from the env: recipe
-# above. No tp: blocks — TP is unsupported for these models.
+# DeepSeek family: wideEP, plus TP on the moriio connector only (MORIIO_TP_MODELS in
+# run_xPyD_models.slurm; rixl TP stays rejected). The dp: blocks are empty because the
+# moriio(mori) connector emits the validated wideEP serve flags (block-size, kv-cache-*,
+# all2all, cudagraph) from the env: recipe above.
+#
+# tp: the TP baseline (TP8 per instance, experts sharded by TP, no all2all). The moriio TP
+# path takes its degree from IO_TP_SIZE/GENERIC_TP_SIZE (default 8) and emits the per-role
+# cudagraph mode with +quant_fp8 itself, but it does NOT read the KV knobs of the env:
+# recipe, so they are stated here with the same values the wideEP path uses:
+#   - --block-size 16 (block 1 + the AITER-MLA fp8 decode kernel GPU-faults; MLA is off
+#     via the env: recipe on both paths)
+#   - --kv-cache-memory-bytes: the same per-GPU KV budget as wideEP, and it skips the boot
+#     profiling forward (AITER eager fp8 quant bug). Under TP the MLA cache is replicated
+#     on every rank, so one instance holds 1/8 of the KV tokens a DP8 pool does.
+#   - --no-enable-prefix-caching, which the wideEP path hardcodes: without it TP would
+#     differ from wideEP in more than the parallelism.
+_deepseek_tp: &deepseek_tp "--kv-cache-dtype fp8 --block-size 16 --kv-cache-memory-bytes 20000000000 --no-enable-prefix-caching"
+
 DeepSeek-V3:
   env: *deepseek_recipe_env
   prefill:
     dp: ""
+    tp: *deepseek_tp
   decode:
     dp: ""
+    tp: *deepseek_tp
 
 DeepSeek-V3-5layer:
   env: *deepseek_recipe_env
   prefill:
     dp: ""
+    tp: *deepseek_tp
   decode:
     dp: ""
+    tp: *deepseek_tp
 
 DeepSeek-R1:
   env: *deepseek_recipe_env
   prefill:
     dp: ""
+    tp: *deepseek_tp
   decode:
     dp: ""
+    tp: *deepseek_tp
 
 # ============================ MoE + DSA (wideEP only) ============================
 

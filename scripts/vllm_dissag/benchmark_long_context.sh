@@ -93,4 +93,5 @@ echo "==== Long-context benchmark complete ====" | tee -a "${LOG}_CONCURRENCY.lo
 python3 "$_BENCH_DIR/parse_to_csv.py" "${LOG}_CONCURRENCY.log" -o "${LOG}_CONCURRENCY.csv" \
     --perf-csv "/run_logs/${SLURM_JOB_ID}/perf.csv" \
     --model-name "${MODEL_NAME}" \
+    --kv-logs /run_logs/${SLURM_JOB_ID}/decode_NODE*.log \
     2>&1 | tee -a "${LOG}_CONCURRENCY.log" >/dev/null

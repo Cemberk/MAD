@@ -102,10 +102,16 @@ which `models.yaml` blocks apply.
 Use these exact `MODEL_NAME` values. Each must be in `models.yaml` and in the
 allowlists in `run_xPyD_models.slurm`. The **Combos** column lists which of the four
 valid combinations each model may run; the gate in `run_xPyD_models.slurm` rejects any
-other pairing. Dense models are TP-only. The DeepSeek family, `GLM-5.1-FP8` and the
-Kimi-K3 models are wideEP-only: TP is rejected, because their recipes need the wideEP
-serve path. For DeepSeek, the TP argv would double the model's own
-`--compilation-config` and drop the mandatory `+quant_fp8` op.
+other pairing. Dense models are TP-only. `GLM-5.1-FP8` and the Kimi-K3 models are
+wideEP-only: TP is rejected, because their recipes need the wideEP serve path. The
+DeepSeek family runs wideEP, and also TP on the moriio connector (combo 2), as the TP
+baseline to compare wideEP against. Its `tp:` flags in `models.yaml` restate the wideEP
+recipe's KV settings (block size 16, FP8 KV, the same `--kv-cache-memory-bytes`, prefix
+caching off), because the TP path does not read them from the `env:` recipe; the
+connector emits the one `--compilation-config` with `+quant_fp8` on both paths. Under TP
+the MLA KV cache is replicated on every rank, so a TP8 instance holds an eighth of the
+KV tokens of a DP8 pool with the same per-GPU budget. DeepSeek on rixl + TP stays
+rejected.
 
 | Model | Type | Combos | Notes |
 |---|---|---|---|
@@ -114,9 +120,9 @@ serve path. For DeepSeek, the TP argv would double the model's own
 | `Qwen3-32B` | dense | 1, 2 (TP) | Validated serving (MoRIIO + TP). |
 | `gpt-oss-120b` | MoE | 1, 2 (TP) | |
 | `Qwen3-30B-A3B` | MoE | 1, 2 (TP) | Needs a co-versioned AITER image (see [Caveats](#caveats)). |
-| `DeepSeek-V3` | MoE | 3, 4 (wideEP only) | Validated serving (moriio + MoRI-EP). |
-| `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | Smoke and development variant. |
-| `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | Needs a co-versioned AITER image (see [Caveats](#caveats)). |
+| `DeepSeek-V3` | MoE | 2 (moriio TP), 3, 4 | Validated serving (moriio + MoRI-EP). |
+| `DeepSeek-V3-5layer` | MoE | 2 (moriio TP), 3, 4 | Smoke and development variant. |
+| `DeepSeek-R1` | MoE | 2 (moriio TP), 3, 4 | Needs a co-versioned AITER image (see [Caveats](#caveats)). |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | Own image (`glmv5.1` Dockerfile). 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH about 93 to 97 percent). moriio + TP is untested. |
 | `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8 (`EP_TP_SIZE=2`). `docker/vllm_kimi_k3` image. Card `pyt_vllm_disagg_mori_kimi-k3`. |
 | `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8. `docker/vllm_kimi_k3` image. Card `pyt_vllm_disagg_mori_kimi-k3-mxfp4`. Its recipe serves the name `kimi-k3`. |
@@ -128,6 +134,7 @@ The allowlists in `run_xPyD_models.slurm`:
 |---|---|---|
 | `VALID_MODELS` | every run | all twelve models above |
 | `WIDE_EP_ONLY_MODELS` | rejects `WIDE_EP=0` | `DeepSeek-V3`, `DeepSeek-V3-5layer`, `DeepSeek-R1`, `GLM-5.1-FP8`, `Kimi-K3`, `Kimi-K3-MXFP4`, `Kimi-K3-MXFP4-MI355X` |
+| `MORIIO_TP_MODELS` | exempts from the list above on `CONNECTOR=moriio` | `DeepSeek-V3`, `DeepSeek-V3-5layer`, `DeepSeek-R1` |
 | `MORI_EP_VALID_MODELS` | `CONNECTOR=moriio WIDE_EP=1` | same seven |
 | `DEEPEP_VALID_MODELS` | `CONNECTOR=rixl WIDE_EP=1` | `DeepSeek-V3`, `DeepSeek-V3-5layer`, `DeepSeek-R1` |
 
@@ -148,6 +155,7 @@ The cards in [`models.json`](../scripts/vllm_dissag/models.json). All run
 | `pyt_vllm_disagg_nixl_llama-3.3-70b-fp8` | `amd-Llama-3.3-70B-Instruct-FP8-KV` | 2 | rixl + TP | sweep 1024/1024 | `vllm_disagg_inference` |
 | `pyt_vllm_disagg_nixl_gpt-oss-120b` | `gpt-oss-120b` | 2 | rixl + TP | sweep 1024/1024 | `vllm_disagg_inference` |
 | `pyt_vllm_disagg_mori_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm_disagg_inference` |
+| `pyt_vllm_disagg_mori_tp_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1`, `WIDE_EP=0`: moriio + TP8 | sweep 1024/1024 | `vllm_disagg_inference` |
 | `pyt_vllm_disagg_mori_deepseek-r1` | `DeepSeek-R1` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm_disagg_inference` |
 | `pyt_vllm_disagg_mori_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm_disagg_inference` |
 | `pyt_vllm_disagg_mori_glm-5.1-fp8` | `GLM-5.1-FP8` | 2 | `RUN_MORI=1`, `EP_TP_SIZE=8` | sweep 1024/1024 | `vllm_disagg_inference.glmv5.1` |

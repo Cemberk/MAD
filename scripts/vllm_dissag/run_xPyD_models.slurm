@@ -195,14 +195,22 @@ fi
 WIDE_EP="${WIDE_EP:-0}"
 
 # Models that ONLY run wideEP (DP/EP), never TP: the DeepSeek family is served with
-# the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
-# in TP mode is unsupported — the TP argv would double the model's own
-# --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
+# the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph); on rixl its TP
+# argv would double the model's own --compilation-config and drop the mandatory
+# +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
 # Kimi-K3 and Kimi-K3-MXFP4 are wideEP-only as well (see their models.yaml blocks).
 WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" "Kimi-K3-MXFP4-MI355X" )
+# The exception: the DeepSeek family also runs TP on the moriio connector, from the tp:
+# blocks in models.yaml (the TP baseline next to wideEP). Their TP flags are written for
+# that connector, which emits the one --compilation-config with +quant_fp8 itself; rixl
+# TP stays rejected.
+MORIIO_TP_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
 model_is_wide_ep_only() {
   local m="$1"
+  if [[ "${CONNECTOR:-}" == "moriio" ]]; then
+    for x in "${MORIIO_TP_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 1; done
+  fi
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
   return 1
 }
@@ -711,6 +719,9 @@ docker run --rm \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
+    ${BENCHMARK_PROMPTS_PER_CON:+-e BENCHMARK_PROMPTS_PER_CON=$BENCHMARK_PROMPTS_PER_CON} \
+    ${BENCHMARK_MIN_PROMPTS:+-e BENCHMARK_MIN_PROMPTS=$BENCHMARK_MIN_PROMPTS} \
+    ${PERF_LATENCY_METRICS:+-e PERF_LATENCY_METRICS=$PERF_LATENCY_METRICS} \
     ${BENCHMARK_PORT:+-e BENCHMARK_PORT=$BENCHMARK_PORT} \
     ${PROXY_TYPE:+-e PROXY_TYPE=$PROXY_TYPE} \
     ${ROUTER_PORT:+-e ROUTER_PORT=$ROUTER_PORT} \

@@ -3,6 +3,8 @@
 Parse vLLM benchmark log file and save results to CSV.
 Extracts: Concurrency, Input tokens, Output tokens, Total Token throughput (tok/s)
 For each configuration, takes the MAX Total Token throughput across all iterations.
+With PERF_LATENCY_METRICS=1, perf.csv also gets that iteration's latency and
+per-node/per-user throughput, and the KV-bounded max batch per shape (--kv-logs).
 
 Log format (from benchmark_xPyD.sh):
   [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON> (timeout <T>s)
@@ -30,7 +32,8 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     """
     results = defaultdict(lambda: {'concurrency': None, 'input_tokens': None,
                                     'output_tokens': None, 'max_throughput': 0.0,
-                                    'failed': 0, 'stalled': False, 'no_result': False})
+                                    'failed': 0, 'stalled': False, 'no_result': False,
+                                    'latency': {}})
 
     with open(log_file, 'r') as f:
         content = f.read()
@@ -82,11 +85,82 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
         if failed_match:
             data['failed'] = max(data['failed'], int(failed_match.group(1).replace(',', '')))
 
-        # Keep the maximum throughput
+        # Keep the maximum throughput, and the latency measured in that same iteration
         if throughput > data['max_throughput']:
             data['max_throughput'] = throughput
+            data['latency'] = _cell_latency(cell)
 
     return results
+
+
+# The other figures of a `vllm bench serve` result block, by the key they are kept under.
+_LATENCY_FIELDS = {
+    'output_tput': r'Output token throughput \(tok/s\):\s+([\d.]+)',
+    'ttft_p50': r'Median TTFT \(ms\):\s+([\d.]+)',
+    'tpot_p50': r'Median TPOT \(ms\):\s+([\d.]+)',
+    'itl_p50': r'Median ITL \(ms\):\s+([\d.]+)',
+}
+
+
+def _cell_latency(cell: str) -> Dict[str, float]:
+    """The figures in _LATENCY_FIELDS that this cell's result block printed."""
+    out = {}
+    for key, pattern in _LATENCY_FIELDS.items():
+        m = re.search(pattern, cell)
+        if m:
+            out[key] = float(m.group(1))
+    return out
+
+
+def latency_rows(data: Dict, nnodes: int):
+    """(performance, metric) rows for one cell beyond its total throughput: total tok/s per
+    node, output tok/s, output tok/s per user (1000 / median TPOT), and median TTFT, ITL and
+    TPOT. Figures the result block did not print are left out."""
+    lat = data.get('latency') or {}
+    shape = f"isl={data['input_tokens']} osl={data['output_tokens']} con={data['concurrency']}"
+    rows = []
+    if data['max_throughput'] > 0 and nnodes > 0:
+        rows.append((data['max_throughput'] / nnodes, f"tok/s/node ({shape})"))
+    if 'output_tput' in lat:
+        rows.append((lat['output_tput'], f"tok/s output ({shape})"))
+    if lat.get('tpot_p50'):
+        rows.append((1000.0 / lat['tpot_p50'], f"tok/s/user 1000/TPOT p50 ({shape})"))
+    for key, label in (('ttft_p50', 'TTFT'), ('itl_p50', 'ITL'), ('tpot_p50', 'TPOT')):
+        if key in lat:
+            rows.append((lat[key], f"ms {label} p50 ({shape})"))
+    return rows
+
+
+def parse_kv_capacity(log_files):
+    """KV-cache capacity in tokens of each engine in the given server logs.
+
+    vLLM logs "GPU KV cache size: <N> tokens" once per engine core: once for a TP instance,
+    once per DP rank on the wideEP path. Returns the list of N, one per engine."""
+    sizes = []
+    for path in log_files:
+        try:
+            with open(path, errors='replace') as f:
+                for line in f:
+                    m = re.search(r'GPU KV cache size:\s+([\d,]+)\s+tokens', line)
+                    if m:
+                        sizes.append(int(m.group(1).replace(',', '')))
+        except OSError:
+            continue
+    return sizes
+
+
+def kv_max_batch_rows(results: Dict, engine_tokens):
+    """(performance, metric) rows: per ISL/OSL shape, how many requests of that shape the
+    engines' KV caches hold at once. A request needs isl+osl tokens on one engine, so each
+    engine fits floor(capacity / (isl+osl)) and the pool fits their sum."""
+    rows = []
+    if not engine_tokens:
+        return rows
+    for isl, osl in sorted({(k[0], k[1]) for k in results}):
+        n = sum(t // (isl + osl) for t in engine_tokens)
+        rows.append((float(n), f"requests KV-bounded max batch (isl={isl} osl={osl}; "
+                               f"{len(engine_tokens)} decode engine(s), {sum(engine_tokens)} KV tokens)"))
+    return rows
 
 
 def cell_failed(data: Dict) -> bool:
@@ -307,7 +381,8 @@ PERF_CSV_FIELDNAMES = [
 
 
 def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
-                  model_name: str = "", pipeline: str = "vllm", narrow: bool = False):
+                  model_name: str = "", pipeline: str = "vllm", narrow: bool = False,
+                  kv_logs=None):
     """Save throughput results for madengine.
 
     Two schemas, selected by `narrow`:
@@ -318,6 +393,8 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
       launchers, so rows from different launchers stay comparable.
     * narrow=False -- legacy, and still the default. Writes the full 29-column
       perf.csv with metadata assembled from the environment by _get_run_metadata().
+      With PERF_LATENCY_METRICS=1 each cell also gets latency_rows() (same status as its
+      throughput row), and kv_logs (decode server logs) add kv_max_batch_rows().
       Required by the disagg model cards that do NOT declare `multiple_results`:
       madengine reads their CSV directly from a conventional path, with no metadata
       to merge, so a narrow CSV there would lose every descriptive column.
@@ -353,6 +430,9 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
         return
 
     meta = _get_run_metadata(pipeline)
+    import os
+    extra = os.environ.get('PERF_LATENCY_METRICS') == '1'
+    nnodes = int(meta['nnodes'])
 
     fieldnames = PERF_CSV_FIELDNAMES
 
@@ -371,6 +451,18 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
             }
             row.update(meta)
             writer.writerow(row)
+            if extra:
+                for performance, metric in latency_rows(data, nnodes):
+                    row = {'model': model_name, 'performance': f"{performance:.2f}",
+                           'metric': metric, 'status': 'FAILURE' if cell_failed(data) else 'SUCCESS'}
+                    row.update(meta)
+                    writer.writerow(row)
+        if extra and kv_logs:
+            for performance, metric in kv_max_batch_rows(results, parse_kv_capacity(kv_logs)):
+                row = {'model': model_name, 'performance': f"{performance:.0f}",
+                       'metric': metric, 'status': 'SUCCESS'}
+                row.update(meta)
+                writer.writerow(row)
 
     print(f"Saved {len(results)} rows to perf.csv: {output_file}")
 
@@ -452,6 +544,9 @@ def main():
                         help='Emit a narrow results CSV (model/performance/metric[/status]) for a model card '
                              'declaring multiple_results, letting madengine supply the run metadata. '
                              'Ignored with --niah, which is always narrow.')
+    parser.add_argument('--kv-logs', nargs='*', default=None, metavar='LOG',
+                        help='Decode server logs to read KV-cache capacity from, for the '
+                             'KV-bounded max batch rows (PERF_LATENCY_METRICS=1 only)')
     parser.add_argument('--agentic-json', nargs='+', metavar='JSON',
                         help='Write agentic aggregate JSON(s) to --perf-csv (log_file is then ignored)')
 
@@ -502,7 +597,8 @@ def main():
     save_to_csv(results, output_file)
 
     if args.perf_csv:
-        save_perf_csv(results, args.perf_csv, args.model_name, narrow=args.narrow)
+        save_perf_csv(results, args.perf_csv, args.model_name, narrow=args.narrow,
+                      kv_logs=args.kv_logs)
 
     print(f"\nSummary:")
     print(f"  Total unique configurations: {len(results)}")

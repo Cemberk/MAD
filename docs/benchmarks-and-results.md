@@ -55,8 +55,9 @@ length and concurrency.
    `BENCHMARK_COMBINATIONS`:
    - If `SHAPE_WARMUP=1`, runs a **per-shape warmup** at the real ISL/OSL and low
      concurrency, logged to `..._SHAPEWARMUP.log`.
-   - For each concurrency in `BENCHMARK_CON`, runs one **cell**: `2 x concurrency`
-     prompts (at least 16), request rate `inf`, `--ignore-eos`, `--max-concurrency`
+   - For each concurrency in `BENCHMARK_CON`, runs one **cell**:
+     `BENCHMARK_PROMPTS_PER_CON x concurrency` prompts (default 2, at least
+     `BENCHMARK_MIN_PROMPTS`, default 16), request rate `inf`, `--ignore-eos`, `--max-concurrency`
      set to the concurrency. It prints `[RUNNING] prompts <N> isl <ISL> osl <OSL> con
      <CON> (timeout <T>s)` first, then waits 10 seconds after the cell.
 4. Parses the log into `..._CONCURRENCY.csv` and `perf.csv` with `parse_to_csv.py`.
@@ -88,6 +89,9 @@ pass by omission.
 | `BENCHMARK_ITR` | `1` | Iterations of the whole sweep. The CSV keeps the maximum throughput per cell across iterations. |
 | `BENCHMARK_CON` | `8 16 32 64 128 256 512` | Concurrency levels, space-separated. |
 | `BENCHMARK_COMBINATIONS` | `1024/1024 8192/1024 1024/8192` | `ISL/OSL` pairs, space-separated. Most disagg cards set `1024/1024`. |
+| `BENCHMARK_PROMPTS_PER_CON` | `2` | Prompts per cell, as a multiple of its concurrency: the number of waves of requests the cell holds. Raise it for steady-state numbers. |
+| `BENCHMARK_MIN_PROMPTS` | `16` | Lower bound on prompts per cell. |
+| `PERF_LATENCY_METRICS` | unset | `1` adds the latency rows below to perf.csv. |
 | `STEP_TIMEOUT` | `1800` | Base per-cell timeout in seconds, scaled as above. |
 | `WARMUP_CON` | `1` | Global warmup concurrency. |
 | `WARMUP_PROMPTS` | `16` | Global warmup prompts. |
@@ -413,6 +417,27 @@ The log is read cell by cell: each `[RUNNING]` line owns the text up to the next
 cell's result is the result block inside its own text. So a cell that printed nothing still
 gets a row, and no result is ever filed under another cell's concurrency. The global warmup
 before `iter: 1` is not a row.
+
+### Latency rows (`PERF_LATENCY_METRICS=1`)
+
+The vLLM disagg parser adds, after each cell's throughput row and with the same status,
+figures from the iteration that set that cell's maximum throughput:
+
+| `metric` | `performance` |
+|---|---|
+| `tok/s/node (isl=… osl=… con=…)` | total token throughput / nodes in the job |
+| `tok/s output (…)` | output token throughput |
+| `tok/s/user 1000/TPOT p50 (…)` | output tokens per second one request sees |
+| `ms TTFT p50 (…)`, `ms ITL p50 (…)`, `ms TPOT p50 (…)` | median time to first token, inter-token latency, time per output token |
+
+And once per ISL/OSL shape, from the decode servers' logs
+(`/run_logs/<job>/decode_NODE*.log`, `GPU KV cache size: <N> tokens`, one line per engine):
+
+| `metric` | `performance` |
+|---|---|
+| `requests KV-bounded max batch (isl=… osl=…; <E> decode engine(s), <T> KV tokens)` | how many requests of that shape the decode KV caches hold at once: the sum over engines of floor(engine tokens / (ISL + OSL)) |
+
+Without decode logs (a colocated run) the KV row is left out.
 
 The SGLang parser (`scripts/sglang_disagg/parse_to_csv.py`) applies the same rules.
 `sglang.bench_serving` prints no failed count, so an SGLang cell has lost requests when its

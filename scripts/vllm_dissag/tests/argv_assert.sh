@@ -85,6 +85,27 @@ _has    "$KD" '"kv_role":"kv_consumer"' "decode: kv_role = kv_consumer"
 _count  "$KD" "--compilation-config" 1 "decode: exactly one --compilation-config"
 _hasnot "$KD" "mori_high_throughput" "decode: not the prefill all2all backend"
 
+echo ""
+echo "=== moriio + TP (DeepSeek-V3, the TP baseline) ==="
+for _r in 0 1; do
+  T="$(_argv_at "$_r" moriio 0 '' DeepSeek-V3 /m/DSV3)"
+  _role=prefill; [[ "$_r" == "1" ]] && _role=decode
+  _hasadj "$T" "--tensor-parallel-size" "8" "$_role: --tensor-parallel-size 8"
+  _count  "$T" "--compilation-config" 1 "$_role: exactly one --compilation-config"
+  _has    "$T" '"+quant_fp8"' "$_role: +quant_fp8 kept"
+  _hasadj "$T" "--block-size" "16" "$_role: block-size 16 (as wideEP)"
+  _hasadj "$T" "--kv-cache-dtype" "fp8" "$_role: fp8 KV"
+  _hasadj "$T" "--kv-cache-memory-bytes" "20000000000" "$_role: same per-GPU KV budget as wideEP"
+  _has    "$T" "--no-enable-prefix-caching" "$_role: prefix caching off (as wideEP)"
+  _hasnot "$T" "--enable-expert-parallel" "$_role: no expert parallel"
+  _hasnot "$T" "--all2all-backend" "$_role: no all2all"
+  _hasnot "$T" "--data-parallel-size" "$_role: no DP"
+done
+_has "$(_argv_at 1 moriio 0 '' DeepSeek-V3 /m/DSV3)" '"cudagraph_mode":"PIECEWISE"' "decode: PIECEWISE cudagraph"
+_has "$(_argv_at 0 moriio 0 '' DeepSeek-V3 /m/DSV3)" '"cudagraph_mode":"NONE"' "prefill: eager (cudagraph NONE)"
+_has "$(grep -m1 '^MORIIO_TP_MODELS=' "$SLURM")" '"DeepSeek-V3"' "slurm lets DeepSeek-V3 run moriio TP"
+_hasnot "$(grep -m1 '^MORIIO_TP_MODELS=' "$SLURM")" '"GLM-5.1-FP8"' "GLM stays wideEP-only"
+
 # Kimi-K3 is wideEP-only; moriio+TP for it is untested and must stay gated.
 # Scoped to the array's own line: "Kimi-K3" also appears in MORI_EP_VALID_MODELS,
 # so grepping the whole file would pass even with Kimi-K3 removed from this gate.
