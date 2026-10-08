@@ -979,6 +979,29 @@ server hung until the 4000 s start-up timeout, and nothing named the node. Exclu
 node (`sbatch --exclude=<node>`) and report it to the cluster admins. `GPU_CLEAN_CHECK=0`
 skips the check.
 
+## A server that dies of a GPU fault
+
+A worker that hits a GPU memory fault mid-run logs only the runtime's line
+(`Memory access fault by GPU node-N ... Reason: Unknown`, or
+`HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION`) and `Worker proc ... died unexpectedly`,
+and the GPU core dump cannot be written from the container. Every server therefore runs
+a watcher (`_watch_gpu_faults`): when its log shows a fault, it saves the kernel's
+amdgpu lines from `dmesg` (which engine faulted, the address, the process) and the GPU
+memory snapshot to `$LOG_PATH/<job>/gpu_fault_NODE<n>.log`, and prints where.
+
+## Passing other variables into the container
+
+The batch script passes a fixed set of variables to `docker run`. For anything else, such
+as the environment variables a benchmark request names or debug switches, list the names
+in `CONTAINER_ENV` (comma- or space-separated):
+
+```bash
+export HSA_NO_SCRATCH_RECLAIM=1 ROCM_AITER_FA=1 CONTAINER_ENV=HSA_NO_SCRATCH_RECLAIM,ROCM_AITER_FA
+```
+
+Each name is passed as a bare `-e NAME`, so docker takes the value from the batch
+environment and values with spaces or quotes pass unchanged.
+
 ## Testing
 
 ### Offline suites (no GPUs)
@@ -996,6 +1019,7 @@ bash tests/run_all.sh             # every suite below; expect ALL OFFLINE SUITES
 | `tests/parse_to_csv_assert.sh` | That `parse_to_csv.py` gives one row per sweep cell and marks stalled, request-losing and zero-throughput cells `FAILURE`, and the `PERF_LATENCY_METRICS` rows. |
 | `tests/bench_model_name_assert.sh` | That every benchmark request names the served model, and the long-context harness's prompt count under each setting. |
 | `tests/gpu_clean_assert.sh` | The pre-start GPU check (below) against a fake `/sys/class/drm`. |
+| `tests/fault_capture_assert.sh` | The GPU-fault capture and `CONTAINER_ENV` (below). |
 
 `argv_assert.sh` covers, among others:
 

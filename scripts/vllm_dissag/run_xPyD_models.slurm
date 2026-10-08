@@ -657,6 +657,13 @@ for _p in ${SHARED_MOUNT:-/shared_inference} ${NVME_ROOT:-/mnt/m2m_nobackup} ${M
 done
 _SITE_MOUNTS="$(for _m in $_SITE_MOUNTS; do printf -- " -v %s" "$_m"; done)"
 echo "[mounts] site storage:${_SITE_MOUNTS:- none}"
+# Any further variables the run needs inside the container, by name: CONTAINER_ENV is a
+# comma- or space-separated list of names, each passed as a bare `-e NAME`, so docker
+# takes the value from this environment (values with spaces or quotes pass unchanged).
+# For settings no launcher knob covers: the env vars a request names, or debug switches.
+_EXTRA_ENV=""
+for _v in ${CONTAINER_ENV//,/ }; do _EXTRA_ENV="$_EXTRA_ENV -e $_v"; done
+[ -n "$_EXTRA_ENV" ] && echo "[env] passed into the container:${_EXTRA_ENV}"
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -798,6 +805,7 @@ docker run --rm \
     -e VLLM_RPC_TIMEOUT=${VLLM_RPC_TIMEOUT:-300000} \
     -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600} \
     ${CONNECTOR_ENV_ARGS} \
+    ${_EXTRA_ENV} \
     ${VLLM_CUDAGRAPH_MODE:+-e VLLM_CUDAGRAPH_MODE=$VLLM_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
     --name $DOCKER_CONT_NAME \

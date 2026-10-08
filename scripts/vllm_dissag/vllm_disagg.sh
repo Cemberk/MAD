@@ -253,6 +253,32 @@ _check_gpus_clean() {
     _job_fail "GPUs on ${host_name:-$(hostname)} already hold memory before start (${dirty}; allowance ${max_gib} GiB): a process outside this job holds them, see the snapshot above. Exclude this node and report it."
 }
 
+# A server that dies mid-run of a GPU fault logs only the runtime's line ("Memory access
+# fault by GPU node-6 ... Reason: Unknown", "HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION")
+# and then "Worker proc ... died unexpectedly": no kernel, no address, and the GPU core
+# dump fails in the container. The kernel's own record says which engine faulted (a
+# compute kernel or a DMA copy), the faulting address and the process, so when the
+# server's log shows a fault, save that record next to the job's logs. The container
+# runs privileged, so it can read dmesg; if it cannot, the file says so.
+_GPU_FAULT_RE='Memory access fault|HSA_STATUS_ERROR|died unexpectedly'
+_watch_gpu_faults() {  # <role>: watch this node's <role>_NODE<rank>.log in the background
+    local log="${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/${1}_NODE${NODE_RANK}.log"
+    local out="${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/gpu_fault_NODE${NODE_RANK}.log"
+    (
+        until grep -qE "${_GPU_FAULT_RE}" "$log" 2>/dev/null; do sleep 5; done
+        sleep 2   # let the runtime finish printing the fault
+        {
+            echo "=== $(date -u '+%F %T') UTC, ${host_name:-$(hostname)}: GPU fault in ${log}"
+            grep -nE "${_GPU_FAULT_RE}" "$log" | head -n 10
+            echo "----- kernel log (amdgpu) -----"
+            dmesg -T 2>/dev/null | grep -iE 'amdgpu|gmc_v|vm fault|page fault|UTCL2|retry fault|protection fault' | tail -n 80 \
+                || echo "(dmesg not readable in this container)"
+            _print_gpu_snapshot
+        } > "$out" 2>&1
+        echo "[gpu-fault] ${1} on ${host_name:-$(hostname)} reported a GPU fault; kernel record in ${out}"
+    ) &
+}
+
 _print_log_tail() {  # <file> <label>
     echo "----- first error lines of ${2} (${1}) -----"
     # Each distinct message once (pid and timestamp ignored), and without vLLM's
@@ -482,6 +508,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     connector_launch_worker "master" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill"
     local_worker_pid=$WORKER_PID
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] rank0 prefill master emitted; skipping proxy/benchmark."; exit 0; }
+    _watch_gpu_faults prefill
 
     connector_wait_workers_ready
     connector_start_proxy
@@ -530,18 +557,21 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -lt "$xP" ]; then
     print_node_info "Prefill child node"
     connector_launch_worker "child" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill" "${PREFILL_DP_START_RANK}"
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] prefill child emitted."; exit 0; }
+    _watch_gpu_faults prefill
     wait_for_proxy_and_cleanup $WORKER_PID "prefill child"
 
 elif [ "$NODE_RANK" -eq "$xP" ]; then
     print_node_info "Decode master node"
     connector_launch_worker "master" "${DECODE_DP_SIZE}" "${DECODE_MASTER_ADDR}" "kv_consumer" "decode"
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] decode master emitted."; exit 0; }
+    _watch_gpu_faults decode
     wait_for_proxy_and_cleanup $WORKER_PID "decode master"
 
 else
     print_node_info "Decode child node"
     connector_launch_worker "child" "${DECODE_DP_SIZE}" "${DECODE_MASTER_ADDR}" "kv_consumer" "decode" "${DECODE_DP_START_RANK}"
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] decode child emitted."; exit 0; }
+    _watch_gpu_faults decode
     wait_for_proxy_and_cleanup $WORKER_PID "decode child"
 fi
 
