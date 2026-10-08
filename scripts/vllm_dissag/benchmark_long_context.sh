@@ -17,7 +17,8 @@
 #   BENCHMARK_CON            concurrency list           (default "1 4 8")
 #   BENCHMARK_COMBINATIONS   ISL/OSL list               (default "1024/1024")
 #   WARMUPS                  --num-warmups per cell      (default 2)
-#   NUM_PROMPTS_FACTOR       measured prompts = factor*con (default 4, min 16)
+#   NUM_PROMPTS_FACTOR       measured prompts = factor*con (default BENCHMARK_PROMPTS_PER_CON,
+#                            else 4), at least BENCHMARK_MIN_PROMPTS (default 16)
 #   STEP_TIMEOUT             base timeout (s), scaled by tokens (default 2400)
 # =============================================================================
 # This script's own directory: where parse_to_csv.py (and ../common) live. The
@@ -35,7 +36,10 @@ LOG="/run_logs/${SLURM_JOB_ID}/benchmark_long_context_${SLURM_JOB_ID}_${timestam
 CON="${BENCHMARK_CON:-1 4 8}"
 IFS=' ' read -ra COMBINATIONS <<< "${BENCHMARK_COMBINATIONS:-1024/1024}"
 WARMUPS="${WARMUPS:-2}"
-NUM_PROMPTS_FACTOR="${NUM_PROMPTS_FACTOR:-4}"
+# The sweep's prompt knobs apply here too, so one setting sizes every cell of a run;
+# NUM_PROMPTS_FACTOR, this harness's own name, still wins. Defaults unchanged (4, 16).
+NUM_PROMPTS_FACTOR="${NUM_PROMPTS_FACTOR:-${BENCHMARK_PROMPTS_PER_CON:-4}}"
+MIN_PROMPTS="${BENCHMARK_MIN_PROMPTS:-16}"
 
 echo "==== Long-context benchmark (per-shape warmup=${WARMUPS}, EP GPUs=${GPUS_TOTAL}) ${LOG} ====" \
     | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
@@ -48,11 +52,11 @@ for combo in "${COMBINATIONS[@]}"; do
     IFS="/" read -r isl osl <<< "$combo"
     # Concurrency order follows BENCHMARK_CON as given; the default "1 4 8" lists
     # c=1 first so the primary latency metric is measured first (and cleanly warmed).
-    # Measured prompts per cell = NUM_PROMPTS_FACTOR * con (default 4, min 16) --
-    # differs from benchmark_xPyD.sh, which uses con*2.
+    # Measured prompts per cell = NUM_PROMPTS_FACTOR * con, at least MIN_PROMPTS
+    # (defaults 4 and 16; benchmark_xPyD.sh defaults to con*2).
     for con in $CON; do
         n_prompts=$(( con * NUM_PROMPTS_FACTOR ))
-        [ "$n_prompts" -lt 16 ] && n_prompts=16
+        [ "$n_prompts" -lt "$MIN_PROMPTS" ] && n_prompts=$MIN_PROMPTS
         _base_timeout="${STEP_TIMEOUT:-2400}"
         _total_tok=$(( isl + osl ))
         _scaled_timeout=$(( _base_timeout * _total_tok / 2048 ))

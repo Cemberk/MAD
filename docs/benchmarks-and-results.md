@@ -134,7 +134,7 @@ steady-state serving benchmark. It differs from the sweep in three ways:
 | `BENCHMARK_CON` | `1 4 8` | Concurrency list. |
 | `BENCHMARK_COMBINATIONS` | `1024/1024` | `ISL/OSL` list. |
 | `WARMUPS` | `2` | `--num-warmups` per cell. |
-| `NUM_PROMPTS_FACTOR` | `4` | Measured prompts per cell = factor x concurrency (at least 16). The sweep uses 2 x concurrency. |
+| `NUM_PROMPTS_FACTOR` | `BENCHMARK_PROMPTS_PER_CON`, else `4` | Measured prompts per cell = factor x concurrency, at least `BENCHMARK_MIN_PROMPTS` (default 16). So the sweep's prompt settings size long-context cells too; set this only to give long context its own factor. |
 | `STEP_TIMEOUT` | `2400` | Base per-cell timeout, scaled by tokens as in the sweep. Timeouts print `[STALL]`. |
 | `GPUS_TOTAL` | `max(xP, yD) x GPUS_PER_NODE` | GPU count used in the log header. |
 

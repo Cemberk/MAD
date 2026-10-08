@@ -19,6 +19,22 @@ _is "$(grep -c '^export SERVED_MODEL_NAME="${MODEL_NAME:-model}"' "$DIR/../vllm_
     "serve_colocated.sh exports the name it serves under"
 _is "$(grep -c 'export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${MODEL_PATH}}"' "$DIR/vllm_disagg.sh")" "1" \
     "vllm_disagg.sh still defaults it to MODEL_PATH (vLLM's own default)"
+# Prompts per cell in the long-context harness, from its own lines (assignments and the
+# per-cell formula), under the env a run would set.
+_lc_prompts() { # con, then VAR=value...
+    local con=$1; shift
+    env -i PATH="$PATH" "$@" bash -c "
+        $(grep -E '^(NUM_PROMPTS_FACTOR|MIN_PROMPTS)=' "$DIR/benchmark_long_context.sh")
+        con=$con
+        $(grep -E '^\s*(n_prompts=|\[ \"\$n_prompts\")' "$DIR/benchmark_long_context.sh" | sed 's/^ *//')
+        echo \$n_prompts"
+}
+_is "$(_lc_prompts 8)" "32" "long_context default: con x 4"
+_is "$(_lc_prompts 1)" "16" "long_context default: at least 16"
+_is "$(_lc_prompts 8 BENCHMARK_PROMPTS_PER_CON=10 BENCHMARK_MIN_PROMPTS=10)" "80" "long_context follows BENCHMARK_PROMPTS_PER_CON"
+_is "$(_lc_prompts 1 BENCHMARK_PROMPTS_PER_CON=10 BENCHMARK_MIN_PROMPTS=10)" "10" "long_context follows BENCHMARK_MIN_PROMPTS"
+_is "$(_lc_prompts 8 BENCHMARK_PROMPTS_PER_CON=10 NUM_PROMPTS_FACTOR=3)" "24" "NUM_PROMPTS_FACTOR still wins in long_context"
+
 echo "======================================================"
 echo "  bench_model_name_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"
