@@ -216,16 +216,41 @@ _SERVER_ERROR_LINE_RE='Error|error:|Exception|NCCL WARN|out of memory|hipError|S
 # Who holds this node's GPU memory, from the kernel (readable inside the container): one
 # failure was "free memory on startup is less than desired" on 3 of 8
 # GPUs, and nothing in the log could say what held it.
+_GPU_SYSFS_ROOT="${_GPU_SYSFS_ROOT:-/sys/class/drm}"
 _print_gpu_snapshot() {
     echo "----- GPU memory on $(hostname) -----"
     local d
-    for d in /sys/class/drm/card*/device; do
+    for d in "${_GPU_SYSFS_ROOT}"/card*/device; do
         [ -r "$d/mem_info_vram_used" ] || continue
-        echo "$(basename "$(dirname "$d")"): $(( $(cat "$d/mem_info_vram_used") >> 30 )) GiB used of $(( $(cat "$d/mem_info_vram_total") >> 30 )) GiB"
+        echo "$(basename "$(dirname "$d")") ($(basename "$(readlink -f "$d")")): $(( $(cat "$d/mem_info_vram_used") >> 30 )) GiB used of $(( $(cat "$d/mem_info_vram_total") >> 30 )) GiB"
     done
     echo "----- processes holding GPU memory (KFD; host pids) -----"
     ls /sys/class/kfd/kfd/proc 2>/dev/null | tr '\n' ' '; echo
     command -v rocm-smi >/dev/null 2>&1 && rocm-smi --showpids 2>/dev/null | grep -vE '^=+|^\s*$' | head -n 30 || true
+}
+
+# Before this node starts anything, every GPU must be free. A GPU that already holds
+# memory belongs to a process this job did not start -- left behind on the node by an
+# earlier job (on a preemptible partition, jobs are killed mid-run). vLLM then refused
+# to start ("Free memory on device cuda:5 (151.62/191.98 GiB) on startup is less than
+# desired") minutes into the job, or a server hung until the 4000s timeout, and nothing
+# said which node or what held the memory. Fail here instead, naming the node, the GPU
+# and the holders, so the node can be excluded and reported. GPU_CLEAN_MAX_USED_GIB is
+# the idle allowance (driver and firmware reservations are well under it);
+# GPU_CLEAN_CHECK=0 skips the check.
+_check_gpus_clean() {
+    [ "${GPU_CLEAN_CHECK:-1}" = "1" ] || return 0
+    local max_gib="${GPU_CLEAN_MAX_USED_GIB:-4}" d used dirty=""
+    for d in "${_GPU_SYSFS_ROOT}"/card*/device; do
+        [ -r "$d/mem_info_vram_used" ] || continue
+        used=$(( $(cat "$d/mem_info_vram_used") >> 30 ))
+        if [ "$used" -gt "$max_gib" ]; then
+            dirty="${dirty:+${dirty}, }$(basename "$(dirname "$d")") ($(basename "$(readlink -f "$d")")) ${used} GiB"
+        fi
+    done
+    [ -z "$dirty" ] && return 0
+    _print_gpu_snapshot
+    _job_fail "GPUs on ${host_name:-$(hostname)} already hold memory before start (${dirty}; allowance ${max_gib} GiB): a process outside this job holds them, see the snapshot above. Exclude this node and report it."
 }
 
 _print_log_tail() {  # <file> <label>
@@ -434,6 +459,7 @@ echo "PREFILL_MASTER_ADDR=${PREFILL_MASTER_ADDR}  DECODE_MASTER_ADDR=${DECODE_MA
 # Container barrier + runtime patches (skipped under DRY_RUN)
 # =============================================================================
 if [[ "${DRY_RUN:-0}" != "1" ]]; then
+    _check_gpus_clean
     _BARRIER_PORT="${CONTAINER_BARRIER_PORT:-2222}"
     for _pid in $(ss -tlnp sport = ${_BARRIER_PORT} 2>/dev/null | grep -oP "pid=\K\d+"); do
         kill -9 "$_pid" 2>/dev/null

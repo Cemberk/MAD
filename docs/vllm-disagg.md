@@ -960,6 +960,25 @@ the containers, which print the same blocks into `pd_vllm_bench_NODE<rank>.log`.
 batch-host steps (GPU check, weights probe) still run, and because no benchmark runs,
 the job then ends with the `no perf CSV` error.
 
+## A node whose GPUs are not free
+
+Before a node starts its servers, `vllm_disagg.sh` checks that every GPU on it is idle
+(`_check_gpus_clean`, before the container barrier). A GPU already holding more than
+`GPU_CLEAN_MAX_USED_GIB` (default 4) GiB belongs to a process outside the job, usually
+left behind by an earlier job that was killed mid-run, as happens on preemptible
+partitions. The node then fails at once with:
+
+```
+ERROR: GPUs on <node> already hold memory before start (card6 (0000:16:00.0) 40 GiB; allowance 4 GiB): ...
+```
+
+followed by every GPU's memory and the processes holding it, and the other nodes stop
+through the abort file. Without the check, vLLM refused to start minutes later
+(`Free memory on device cuda:N ... is less than desired GPU memory utilization`), or a
+server hung until the 4000 s start-up timeout, and nothing named the node. Exclude the
+node (`sbatch --exclude=<node>`) and report it to the cluster admins. `GPU_CLEAN_CHECK=0`
+skips the check.
+
 ## Testing
 
 ### Offline suites (no GPUs)
@@ -967,14 +986,16 @@ the job then ends with the `no perf CSV` error.
 Run after any change to the launcher, the connectors or the yaml:
 
 ```bash
-bash tests/run_all.sh             # gate_check + argv_assert; expect ALL OFFLINE SUITES PASSED
+bash tests/run_all.sh             # every suite below; expect ALL OFFLINE SUITES PASSED
 ```
 
 | Test | What it checks |
 |---|---|
 | `tests/gate_check.sh` | The (model x connector x `WIDE_EP` x `EP_BACKEND`) gate accepts exactly the supported combinations and rejects the rest, including the back-compat shims. It runs a hand-kept **mirror** of the lists in `run_xPyD_models.slurm`, so editing those lists without editing the mirror is not caught. |
 | `tests/argv_assert.sh` | From the launcher's `DRY_RUN=1` output, that each connector x `WIDE_EP` x role cell emits the expected `vllm serve` flags and env and omits the wrong ones. |
-| `tests/parse_to_csv_assert.sh` | That `parse_to_csv.py` gives one row per sweep cell and marks stalled, request-losing and zero-throughput cells `FAILURE`. Not part of `run_all.sh`; run it directly. |
+| `tests/parse_to_csv_assert.sh` | That `parse_to_csv.py` gives one row per sweep cell and marks stalled, request-losing and zero-throughput cells `FAILURE`, and the `PERF_LATENCY_METRICS` rows. |
+| `tests/bench_model_name_assert.sh` | That every benchmark request names the served model, and the long-context harness's prompt count under each setting. |
+| `tests/gpu_clean_assert.sh` | The pre-start GPU check (below) against a fake `/sys/class/drm`. |
 
 `argv_assert.sh` covers, among others:
 
