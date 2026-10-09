@@ -36,6 +36,20 @@ O="$(_watch prefill 'INFO serving
 INFO Application startup complete.')"
 _has "${O:-<none>}" "<none>" "a healthy server writes no capture"
 _has "$(grep -c '^    _watch_gpu_faults \(prefill\|decode\)$' "$DIR/vllm_disagg.sh")" "4" "all four server roles start a watcher"
+# The script's output goes through `| tee` in the container: a watcher that still holds it
+# when the script ends keeps the container, and the job, up until the wall clock.
+printf 'INFO serving\n' > "$TMP/logs/42/decode_NODE1.log"
+_t0=$(date +%s)
+O="$(env -i PATH="$PATH" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=42 NODE_RANK=1 bash -c "$FUNCS
+    _watch_gpu_faults decode; echo \"watchers:\${_GPU_FAULT_WATCHERS}\"; echo script-done" 2>&1 | timeout 20 cat)"
+_rc=$?; _t=$(( $(date +%s) - _t0 ))
+_has "$O" "script-done" "the script's output arrives"
+_has "rc=$_rc took<10s=$([ "$_t" -lt 10 ] && echo yes || echo "no(${_t}s)")" "rc=0 took<10s=yes" \
+     "the output pipe closes as soon as the script exits (no watcher holds it)"
+_wpids="$(sed -n 's/^watchers://p' <<<"$O")"
+sleep 1; _alive=""; for p in $_wpids; do kill -0 "$p" 2>/dev/null && _alive="$_alive $p"; done
+_has "started=[${_wpids# }] alive=[${_alive# }]" "alive=[]" "the watcher is killed when the script exits"
+_has "${_wpids:-none}" "${_wpids:-x}" "the script recorded its watcher's pid"
 
 echo ""
 echo "=== CONTAINER_ENV ==="

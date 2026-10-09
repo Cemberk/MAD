@@ -260,7 +260,15 @@ _check_gpus_clean() {
 # compute kernel or a DMA copy), the faulting address and the process, so when the
 # server's log shows a fault, save that record next to the job's logs. The container
 # runs privileged, so it can read dmesg; if it cannot, the file says so.
+#
+# The watcher must not keep this script's output open: the container runs
+# `vllm_disagg.sh 2>&1 | tee ...`, and tee ends only when every holder of the pipe has
+# closed it. A watcher that inherited it kept two finished jobs (their sweeps done)
+# running until the 4-hour wall clock. So it runs with its own output redirected, and
+# every watcher is killed when this script exits.
 _GPU_FAULT_RE='Memory access fault|HSA_STATUS_ERROR|died unexpectedly'
+_GPU_FAULT_WATCHERS=""
+trap '[ -n "${_GPU_FAULT_WATCHERS}" ] && kill ${_GPU_FAULT_WATCHERS} 2>/dev/null' EXIT
 _watch_gpu_faults() {  # <role>: watch this node's <role>_NODE<rank>.log in the background
     local log="${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/${1}_NODE${NODE_RANK}.log"
     local out="${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/gpu_fault_NODE${NODE_RANK}.log"
@@ -275,8 +283,10 @@ _watch_gpu_faults() {  # <role>: watch this node's <role>_NODE<rank>.log in the 
                 || echo "(dmesg not readable in this container)"
             _print_gpu_snapshot
         } > "$out" 2>&1
-        echo "[gpu-fault] ${1} on ${host_name:-$(hostname)} reported a GPU fault; kernel record in ${out}"
-    ) &
+        echo "[gpu-fault] ${1} on ${host_name:-$(hostname)} reported a GPU fault; kernel record in ${out}" \
+            >> "${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log"
+    ) </dev/null >/dev/null 2>&1 &
+    _GPU_FAULT_WATCHERS="${_GPU_FAULT_WATCHERS} $!"
 }
 
 _print_log_tail() {  # <file> <label>
