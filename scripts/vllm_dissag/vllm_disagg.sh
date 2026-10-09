@@ -240,15 +240,19 @@ _print_gpu_snapshot() {
 # GPU_CLEAN_CHECK=0 skips the check.
 _check_gpus_clean() {
     [ "${GPU_CLEAN_CHECK:-1}" = "1" ] || return 0
-    local max_gib="${GPU_CLEAN_MAX_USED_GIB:-4}" d used dirty=""
+    local max_gib="${GPU_CLEAN_MAX_USED_GIB:-4}" d used dirty="" n=0 most=0
     for d in "${_GPU_SYSFS_ROOT}"/card*/device; do
         [ -r "$d/mem_info_vram_used" ] || continue
-        used=$(( $(cat "$d/mem_info_vram_used") >> 30 ))
+        used=$(( $(cat "$d/mem_info_vram_used") >> 30 )); n=$((n + 1))
+        [ "$used" -gt "$most" ] && most=$used
         if [ "$used" -gt "$max_gib" ]; then
             dirty="${dirty:+${dirty}, }$(basename "$(dirname "$d")") ($(basename "$(readlink -f "$d")")) ${used} GiB"
         fi
     done
-    [ -z "$dirty" ] && return 0
+    if [ -z "$dirty" ]; then
+        echo "[gpu-check] ${host_name:-$(hostname)}: ${n} GPUs idle before start (most used: ${most} GiB, allowance ${max_gib} GiB)"
+        return 0
+    fi
     _print_gpu_snapshot
     _job_fail "GPUs on ${host_name:-$(hostname)} already hold memory before start (${dirty}; allowance ${max_gib} GiB): a process outside this job holds them, see the snapshot above. Exclude this node and report it."
 }
@@ -287,6 +291,27 @@ _watch_gpu_faults() {  # <role>: watch this node's <role>_NODE<rank>.log in the 
             >> "${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log"
     ) </dev/null >/dev/null 2>&1 &
     _GPU_FAULT_WATCHERS="${_GPU_FAULT_WATCHERS} $!"
+}
+
+# AITER builds each JIT module under a lock file (<AITER_JIT_DIR>/build/lock_<module>)
+# and every other worker waits for its holder ("waiting for baton release"). The
+# directory is the persistent per-node cache mounted at /opt/vllm_cache, so a job killed
+# mid-build -- preempted, cancelled, timed out -- leaves its lock behind, and every later
+# job on the node waits on it forever: one decode server sat 67 min on
+# lock_module_gemm_a8w8_blockscale with nobody building. Cleared here, in the container,
+# because the locks are created by the container's root user and the batch script,
+# running as the job's user, cannot delete them. Nothing of this job builds yet (call
+# this before any server starts; jobs are exclusive), so on the default per-node cache
+# every lock is stale; a JIT_CACHE_HOST the caller set may be shared with other jobs, so
+# there only locks older than JIT_LOCK_STALE_MIN (default 60) minutes are removed.
+_clear_stale_jit_locks() {
+    local build="${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}/build" age="" l
+    [ -d "$build" ] || return 0
+    [ -n "${JIT_CACHE_HOST:-}" ] && age="-mmin +${JIT_LOCK_STALE_MIN:-60}"
+    for l in $(find "$build" -maxdepth 1 -name "lock_*" $age 2>/dev/null); do
+        echo "[jit-cache] $(hostname): removing stale AITER build lock $l (left $(date -r "$l" "+%F %T"))"
+        rm -rf "$l"
+    done
 }
 
 _print_log_tail() {  # <file> <label>
@@ -495,6 +520,7 @@ echo "PREFILL_MASTER_ADDR=${PREFILL_MASTER_ADDR}  DECODE_MASTER_ADDR=${DECODE_MA
 # Container barrier + runtime patches (skipped under DRY_RUN)
 # =============================================================================
 if [[ "${DRY_RUN:-0}" != "1" ]]; then
+    _clear_stale_jit_locks
     _check_gpus_clean
     _BARRIER_PORT="${CONTAINER_BARRIER_PORT:-2222}"
     for _pid in $(ss -tlnp sport = ${_BARRIER_PORT} 2>/dev/null | grep -oP "pid=\K\d+"); do

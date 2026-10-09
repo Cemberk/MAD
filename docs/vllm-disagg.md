@@ -667,7 +667,7 @@ starts fresh and never reuses stale-ABI objects.
 |---|---|---|
 | `JIT_CACHE_PERSIST` | `1` | `0` disables the mount (empty in-container cache). |
 | `JIT_CACHE_HOST` | `/mnt/m2m_nobackup/$USER/vllm_jit_cache/<image id>` | Host directory. |
-| `JIT_LOCK_STALE_MIN` | `60` | Before the container starts, AITER build locks (`aiter_jit/build/lock_*`) left by a job killed mid-build are removed, so the next job does not wait on them forever (`waiting for baton release`). On the default per-node cache every lock is removed; on a `JIT_CACHE_HOST` you set, which may be shared, only locks older than this many minutes. Compiled modules are kept. |
+| `JIT_LOCK_STALE_MIN` | `60` | When the container starts, before any server, AITER build locks (`aiter_jit/build/lock_*`) left by a job killed mid-build are removed, so the next job does not wait on them forever (`waiting for baton release`). On the default per-node cache every lock is removed; on a `JIT_CACHE_HOST` you set, which may be shared, only locks older than this many minutes. Compiled modules are kept. |
 | `JIT_CACHE_SPLIT_ROLE` | `1` | With `EP_TP_SIZE > 1`, separate `prefill/` and `decode/` subdirectories. |
 
 ## Validation status
@@ -1021,7 +1021,7 @@ bash tests/run_all.sh             # every suite below; expect ALL OFFLINE SUITES
 | `tests/bench_model_name_assert.sh` | That every benchmark request names the served model, and the long-context harness's prompt count under each setting. |
 | `tests/gpu_clean_assert.sh` | The pre-start GPU check (below) against a fake `/sys/class/drm`. |
 | `tests/fault_capture_assert.sh` | The GPU-fault capture and `CONTAINER_ENV` (below). |
-| `tests/jit_lock_assert.sh` | The stale AITER build-lock cleanup, in both launchers. |
+| `tests/jit_lock_assert.sh` | The stale AITER build-lock cleanup, in both container scripts. |
 
 `argv_assert.sh` covers, among others:
 

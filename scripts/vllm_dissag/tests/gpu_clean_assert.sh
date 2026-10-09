@@ -34,6 +34,7 @@ _fake_node "$TMP/clean" 0 1 0 0 1 0 0 0
 O="$(_run "$TMP/clean")"
 _has    "$O" "STARTED" "idle GPUs (driver reservations under the allowance): the node starts"
 _hasnot "$O" "JOB_FAIL" "idle GPUs: no failure"
+_has    "$O" "[gpu-check] node-x: 8 GPUs idle before start (most used: 1 GiB, allowance 4 GiB)" "a clean node says the check ran and what it saw"
 
 _fake_node "$TMP/dirty" 0 0 0 0 0 40 0 0
 O="$(_run "$TMP/dirty")"

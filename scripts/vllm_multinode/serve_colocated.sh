@@ -151,6 +151,28 @@ if [[ "${PREWARM_CHECKPOINT:-0}" == "1" ]]; then
     fi
 fi
 
+# AITER builds each JIT module under a lock file (<AITER_JIT_DIR>/build/lock_<module>)
+# and every other worker waits for its holder ("waiting for baton release"). The
+# directory is the persistent per-node cache mounted at /opt/vllm_cache, so a job killed
+# mid-build -- preempted, cancelled, timed out -- leaves its lock behind, and every later
+# job on the node waits on it forever: one decode server sat 67 min on
+# lock_module_gemm_a8w8_blockscale with nobody building. Cleared here, in the container,
+# because the locks are created by the container's root user and the batch script,
+# running as the job's user, cannot delete them. Nothing of this job builds yet (call
+# this before any server starts; jobs are exclusive), so on the default per-node cache
+# every lock is stale; a JIT_CACHE_HOST the caller set may be shared with other jobs, so
+# there only locks older than JIT_LOCK_STALE_MIN (default 60) minutes are removed.
+_clear_stale_jit_locks() {
+    local build="${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}/build" age="" l
+    [ -d "$build" ] || return 0
+    [ -n "${JIT_CACHE_HOST:-}" ] && age="-mmin +${JIT_LOCK_STALE_MIN:-60}"
+    for l in $(find "$build" -maxdepth 1 -name "lock_*" $age 2>/dev/null); do
+        echo "[jit-cache] $(hostname): removing stale AITER build lock $l (left $(date -r "$l" "+%F %T"))"
+        rm -rf "$l"
+    done
+}
+_clear_stale_jit_locks
+
 # -----------------------------------------------------------------------------
 # Container barrier — every node's container must exist before any rank dials the
 # master, otherwise early ranks burn their connect retries against a dead port.
