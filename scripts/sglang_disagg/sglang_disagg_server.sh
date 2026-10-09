@@ -88,6 +88,11 @@ if [[ -z "$MODEL_NAME" ]]; then
 else
     PREFILL_MODEL_CONFIG=$(get_model_config "prefill" "$MODEL_NAME")
     DECODE_MODEL_CONFIG=$(get_model_config "decode" "$MODEL_NAME")
+    # Recipe flags adapted to the installed sglang (renamed options); see sglang_compat.sh.
+    # shellcheck source=/dev/null
+    source "$(dirname "${BASH_SOURCE[0]}")/sglang_compat.sh"
+    PREFILL_MODEL_CONFIG="$(sgl_compat_flags "${PREFILL_MODEL_CONFIG}")"
+    DECODE_MODEL_CONFIG="$(sgl_compat_flags "${DECODE_MODEL_CONFIG}")"
     echo "Using model-specific configuration for: $MODEL_NAME"
 fi
 

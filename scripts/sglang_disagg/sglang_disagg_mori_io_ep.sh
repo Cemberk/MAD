@@ -100,7 +100,10 @@ host_name=$(hostname)
 # 4000s later, and the job still ran to its 6-hour TIMEOUT.
 JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID:-0}/ABORTED"
 # Lines SGLang prints only when a server has died.
-_FATAL_SERVER_LOG_RE='Scheduler hit an exception|Received sigquit from a child process'
+# A server that rejects its command line exits at once with argparse's
+# "<prog>: error: ..." (sglang 0.5.20: "sglang serve: error: unrecognized arguments");
+# without it here the wait below sat until its timeout for a server that never ran.
+_FATAL_SERVER_LOG_RE='Scheduler hit an exception|Received sigquit from a child process|: error: (unrecognized arguments|ambiguous option|argument |the following arguments are required)'
 # First error lines, then the tail: the tail of a dead server is its traceback, and the
 # cause is usually earlier.
 # Who holds this node's GPU memory, from the kernel (readable inside the container): one
@@ -279,17 +282,14 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS SERVER_
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
-# --prefill-round-robin-balance exists in the sglang these recipes were tuned on
-# (0.5.12) and was removed later: 0.5.20 refuses to start with "unrecognized
-# arguments". Pass it when the installed sglang defines it, read from its
-# server_args.py (no import, so no torch start-up). If that cannot be read, pass
-# it as before.
-_SGL_PRR_FLAG="--prefill-round-robin-balance"
-_sgl_args_py="$(python3 -c 'import importlib.util as u; s = u.find_spec("sglang"); print(s.submodule_search_locations[0] + "/srt/server_args.py")' 2>/dev/null)"
-if [ -f "${_sgl_args_py}" ] && ! grep -q -- "prefill-round-robin-balance" "${_sgl_args_py}"; then
-    _SGL_PRR_FLAG=""
-    echo "[sglang] this sglang has no --prefill-round-robin-balance; launching without it"
-fi
+# Recipe flags adapted to the installed sglang (removed and renamed options); see
+# sglang_compat.sh.
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/sglang_compat.sh"
+_SGL_PRR_FLAG="$(sgl_prr_flag)"
+PREFILL_MODEL_CONFIG="$(sgl_compat_flags "${PREFILL_MODEL_CONFIG}")"
+DECODE_MODEL_CONFIG="$(sgl_compat_flags "${DECODE_MODEL_CONFIG}")"
+export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
 
 # KV transfer backend: default mori, switchable to mooncake (Mooncake).
 # Kept out of models.yaml so model config is backend-agnostic.

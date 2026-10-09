@@ -413,9 +413,17 @@ them. It reads
 (4000), `ROUTER_POLL_SLEEP_SECONDS` (10), `SEARCH_SIGNAL`, `ROUTER_HTTP_BASE` and `CURL_TEST_MODEL`.
 These use their defaults unless the image or a forwarded name sets them.
 
-`--prefill-round-robin-balance` is passed only to an sglang that defines it (read from its
-`server_args.py`). The 0.5.12 sglang these recipes were tuned on has it; later releases removed it
-and refuse to start with it.
+The recipes were tuned on sglang 0.5.12. Both launchers adapt their flags to the installed sglang
+(`sglang_compat.sh`), reading what it accepts from its own `--help`:
+
+- `--prefill-round-robin-balance` is passed only where it is accepted. Later releases removed it
+  and refuse to start with it (0.5.20: `unrecognized arguments`).
+- `--cuda-graph-bs`, which later releases split into `--cuda-graph-bs-decode` and
+  `--cuda-graph-bs-prefill` (0.5.20: `ambiguous option`), is passed as `--cuda-graph-bs-decode`,
+  the graphs it sized.
+
+If `--help` cannot be read, the flags pass unchanged. A server that rejects its command line is
+caught at once, not after `ROUTER_READY_TIMEOUT_SECONDS`.
 
 ## Model cards
 
