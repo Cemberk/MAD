@@ -131,6 +131,42 @@ _print_server_log() {  # <file>
     tail -n 80 "$1" 2>/dev/null || true
     _print_gpu_snapshot
 }
+# A server that dies mid-run of a GPU fault logs only the runtime's line ("Memory access
+# fault by GPU node-6 ... Reason: Unknown", "HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION")
+# and then "Worker proc ... died unexpectedly": no kernel, no address, and the GPU core
+# dump fails in the container. The kernel's own record says which engine faulted (a
+# compute kernel or a DMA copy), the faulting address and the process, so when the
+# server's log shows a fault, save that record next to the job's logs. The container
+# runs privileged, so it can read dmesg; if it cannot, the file says so.
+#
+# The watcher must not keep this script's output open: the container runs
+# `vllm_disagg.sh 2>&1 | tee ...`, and tee ends only when every holder of the pipe has
+# closed it. A watcher that inherited it kept two finished jobs (their sweeps done)
+# running until the 4-hour wall clock. So it runs with its own output redirected, and
+# every watcher is killed when this script exits.
+_GPU_FAULT_RE='Memory access fault|HSA_STATUS_ERROR|died unexpectedly'
+_GPU_FAULT_WATCHERS=""
+trap '[ -n "${_GPU_FAULT_WATCHERS}" ] && kill ${_GPU_FAULT_WATCHERS} 2>/dev/null' EXIT
+_watch_gpu_faults() {  # <role>: watch this node's <role>_NODE<rank>.log in the background
+    local log="${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/${1}_NODE${NODE_RANK}.log"
+    local out="${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/gpu_fault_NODE${NODE_RANK}.log"
+    (
+        until grep -qE "${_GPU_FAULT_RE}" "$log" 2>/dev/null; do sleep 5; done
+        sleep 2   # let the runtime finish printing the fault
+        {
+            echo "=== $(date -u '+%F %T') UTC, ${host_name:-$(hostname)}: GPU fault in ${log}"
+            grep -nE "${_GPU_FAULT_RE}" "$log" | head -n 10
+            echo "----- kernel log (amdgpu) -----"
+            dmesg -T 2>/dev/null | grep -iE 'amdgpu|gmc_v|vm fault|page fault|UTCL2|retry fault|protection fault' | tail -n 80 \
+                || echo "(dmesg not readable in this container)"
+            _print_gpu_snapshot
+        } > "$out" 2>&1
+        echo "[gpu-fault] ${1} on ${host_name:-$(hostname)} reported a GPU fault; kernel record in ${out}" \
+            >> "${_RUN_LOGS:-/run_logs}/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log"
+    ) </dev/null >/dev/null 2>&1 &
+    _GPU_FAULT_WATCHERS="${_GPU_FAULT_WATCHERS} $!"
+}
+
 # Everything this launcher started, children first. A node that gives up must not leave
 # its servers running: they hold the container's output pipe, so the container -- and
 # the SLURM job -- stayed up until the wall clock. In one run NODE1's decode
@@ -491,6 +527,7 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     set +x
     _node0_prefill_pid=$!
     _dbg "prefill server started pid=${_node0_prefill_pid}"
+    _watch_gpu_faults prefill
 
     # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 0..xP-1) and decode (NODE xP..xP+yD-1) log.
     # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
@@ -758,6 +795,7 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     set +x
     prefill_pid=$!
     _dbg "prefill server started pid=${prefill_pid}"
+    _watch_gpu_faults prefill
 
     _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
     echo "Waiting for proxy server to be up..."
@@ -842,6 +880,7 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     set +x
     decode_pid=$!
     _dbg "decode server started pid=${decode_pid}"
+    _watch_gpu_faults decode
 
     _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
     echo "Waiting for proxy server to be up..."
