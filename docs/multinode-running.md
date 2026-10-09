@@ -669,7 +669,7 @@ these through `env_vars`.
 | `CONTAINER_BARRIER_PORT` | `2223` | Container-creation barrier port. |
 | `COLOCATED_FORWARD_ENV` | empty | Comma-separated names of extra variables to forward into the containers (timeouts, pre-warm), without editing the launcher. |
 | `PREWARM_CHECKPOINT` | `0` | `1` reads the whole checkpoint into page cache on every node before serving. Off because it made things worse: every node reads the whole checkpoint while PP2 x TP8 loads only its own shard, about 4 times the necessary I/O against one NFS export. Bounded by `PREWARM_TIMEOUT_SECONDS` (default 900); `PREWARM_JOBS` (default 4) sets parallel readers. Useful only as a storage probe: a large spread between nodes means storage is the bottleneck. |
-| `JIT_CACHE_PERSIST` / `JIT_CACHE_HOST` | `1` / `/mnt/m2m_nobackup/$USER/vllm_jit_cache/<image id>` | Persistent AITER/Triton kernel cache per image. |
+| `JIT_CACHE_PERSIST` / `JIT_CACHE_HOST` | `1` / `/mnt/m2m_nobackup/$USER/vllm_jit_cache/<image id>` | Persistent AITER/Triton kernel cache per image. Stale AITER build locks in it are removed before each job (`JIT_LOCK_STALE_MIN`, see [vllm-disagg.md](vllm-disagg.md)). |
 
 The colocated cards also have a twin, `pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4`, that sets
 the same environment through `MAD_CONFIG: mad-config.kimi-k3.yaml`; it exists to be

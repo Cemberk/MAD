@@ -583,6 +583,21 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
             "Safe to delete when no job is running; it is rebuilt on demand." \
             > "$_JIT_CACHE_HOST/README.ci" 2>/dev/null || true
     fi
+    # AITER builds each JIT module under a lock file (aiter_jit/build/lock_<module>) and
+    # every other worker waits for the holder ("waiting for baton release"). A job killed
+    # mid-build -- preempted, cancelled, timed out -- leaves its lock behind in this
+    # persistent cache, and every later job on the node then waits on it forever: one
+    # decode server sat 67 min on lock_module_gemm_a8w8_blockscale with nobody building.
+    # Nothing of ours runs on the node yet (jobs are exclusive), so on the default
+    # per-node cache every lock found here is stale. A JIT_CACHE_HOST set by the caller
+    # may be shared with other jobs, so there only locks older than JIT_LOCK_STALE_MIN
+    # (default 60) minutes are removed.
+    _JIT_LOCK_AGE=""
+    [ -n "${JIT_CACHE_HOST:-}" ] && _JIT_LOCK_AGE="-mmin +${JIT_LOCK_STALE_MIN:-60}"
+    for _l in $(find "$_JIT_CACHE_HOST" -path "*/aiter_jit/build/lock_*" $_JIT_LOCK_AGE 2>/dev/null); do
+        echo "[jit-cache] $(hostname): removing stale AITER build lock $_l (left $(date -r "$_l" "+%F %T"))"
+        rm -rf "$_l"
+    done
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
 else
