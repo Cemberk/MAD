@@ -56,7 +56,16 @@ the valid ones:
 ## Building the image
 
 The Dockerfile is [`docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`](../docker/sglang_disagg_inference.ubuntu.amd.Dockerfile).
-Its base image is `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x`.
+It picks its stack from `MAD_SYSTEM_GPU_ARCHITECTURE`, which madengine passes:
+
+| Architecture | Base image | MoRI |
+|---|---|---|
+| `gfx942` (MI300X), the default | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | built at `MORI_COMMIT` |
+| `gfx950` (MI355X) | `rocm/sgl-dev:v0.5.20-rocm720-mi35x-20260924` (sglang 0.5.20) | the base image's, v1.2.3 |
+
+MoRI before v1.2.2 registers GPU memory with `ibv_reg_mr` only, which fails (`errno 22`) on nodes
+without a GPU peer-memory module, for example MI355X with AMD AINIC NICs. v1.2.3 falls back to
+dma-buf. The launchers adapt the recipes' flags to sglang 0.5.20 (`sglang_compat.sh`).
 
 ```bash
 cd MAD/docker
@@ -67,16 +76,20 @@ docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Doc
 
 | Arg | Default | Description |
 |---|---|---|
-| `INSTALL_MORI` | `1` | When `1`, builds and installs MoRI at `MORI_COMMIT`. Any other value (for example `0`) skips MoRI entirely. |
-| `MORI_COMMIT` | `158c7e8335a0b19b3f1f422ff134d7869252135e` | MoRI commit to check out and install when `INSTALL_MORI=1`. |
-| `BASE_DOCKER` | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | Base SGLang ROCm image. |
+| `MAD_SYSTEM_GPU_ARCHITECTURE` | `gfx942` | Selects the stack (table above). |
+| `INSTALL_MORI` | `auto` | `1` builds and installs MoRI at `MORI_COMMIT`; `0` keeps the base image's MoRI. `auto`: `1` on gfx942, `0` elsewhere. |
+| `MORI_COMMIT` | `158c7e8335a0b19b3f1f422ff134d7869252135e` | MoRI commit to check out and install when MoRI is installed. |
+| `BASE_DOCKER` | per architecture | Base SGLang ROCm image; when set, overrides the per-architecture base. |
 | `GPU_ARCH` | `gfx942` | Target AMD GPU architecture. |
 
 Examples:
 
 ```bash
-# Default build: installs MoRI pinned at MORI_COMMIT
+# Default build (gfx942): sglang 0.5.12, MoRI pinned at MORI_COMMIT
 docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+
+# MI355X (gfx950): sglang 0.5.20 with its own MoRI
+docker build --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx950 -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
 
 # Skip MoRI (for example when using Mooncake KV transfer only)
 docker build --build-arg INSTALL_MORI=0 -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
