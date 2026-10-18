@@ -57,7 +57,8 @@ _sample() {
             line="${line} ${gpu_name[$id]:-gpu_id $id}=${gib}GiB"
         done
         [ -n "$line" ] || continue
-        cmd=$(tr '\0' ' ' < "$proc/$p/cmdline" 2>/dev/null | cut -c1-160)
+        # Renamed processes (vLLM's "VLLM::Worker_TP3") pad their command line with spaces.
+        cmd=$(tr '\0' ' ' < "$proc/$p/cmdline" 2>/dev/null | cut -c1-160 | sed 's/ *$//')
         cont=$(grep -oE '[0-9a-f]{64}' "$proc/$p/cgroup" 2>/dev/null | head -n 1 | cut -c1-12)
         echo "  pid $p [$([ -n "$cont" ] && echo "container $cont" || echo host)] ${cmd:-(exited)}:${line}"
     done

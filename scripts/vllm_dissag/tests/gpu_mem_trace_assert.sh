@@ -30,13 +30,13 @@ echo $((40 << 30)) > "$K/proc/4100/vram_60001"; echo 0 > "$K/proc/4100/vram_5123
 echo $((1 << 20)) > "$K/proc/4200/vram_51234"
 printf 'python3\0-m\0vllm.entrypoints.openai.api_server\0--port\0' > "$P/4100/cmdline"
 echo "0::/system.slice/docker-$(printf 'ab%.0s' {1..32}).scope" > "$P/4100/cgroup"
-printf 'rocm-smi\0' > "$P/4200/cmdline"; echo "0::/user.slice" > "$P/4200/cgroup"
+printf 'VLLM::Worker_TP0%40s' "" > "$P/4200/cmdline"; echo "0::/user.slice" > "$P/4200/cgroup"
 _trace() { env -i PATH="$PATH" _KFD_ROOT="$K" _PROC_ROOT="$P" _GPU_SYSFS_ROOT="$D" \
     GPU_MEM_TRACE_SECS="$1" GPU_MEM_TRACE_INTERVAL=1 bash "$DIR/gpu_mem_trace.sh" "$TMP/out.log"; cat "$TMP/out.log"; }
 O="$(_trace 2)"
 _has    "$O" "# kfd gpu_id 51234 = GPU0 (0000:11:00.0)" "GPUs are numbered in topology order with their PCI address"
 _has    "$O" "# kfd gpu_id 60001 = GPU1 (0000:2f:00.0)" "the CPU node is skipped in the numbering"
-_has    "$O" "pid 4100 [container abababababab] python3 -m vllm.entrypoints.openai.api_server --port : GPU1 (0000:2f:00.0)=40GiB" \
+_has    "$O" "pid 4100 [container abababababab] python3 -m vllm.entrypoints.openai.api_server --port: GPU1 (0000:2f:00.0)=40GiB" \
         "a holder is named by command line and container, with GiB on the GPU it holds"
 _hasnot "$O" "GPU0 (0000:11:00.0)=0GiB" "GPUs where it holds nothing are left out"
 _hasnot "$O" "pid 4200" "a process holding under 1 GiB is left out"
@@ -47,7 +47,7 @@ rm -f "$K/proc/4200/vram_51234"
 ( sleep 1.5; echo $((7 << 30)) > "$K/proc/4200/vram_51234" ) &
 O="$(_trace 3)"; wait
 _has "$(grep -c '^=== ' <<<"$O")" "2" "a change writes a new sample"
-_has "$O" "pid 4200 [host] rocm-smi : GPU0 (0000:11:00.0)=7GiB" "a host process is marked as such"
+_has "$O" "pid 4200 [host] VLLM::Worker_TP0: GPU0 (0000:11:00.0)=7GiB" "a host process is marked as such; a renamed process loses its space padding"
 # Without the kernel tree (no KFD), it still writes its header and exits on time.
 _t0=$(date +%s)
 O="$(env -i PATH="$PATH" _KFD_ROOT="$TMP/none" _PROC_ROOT="$P" _GPU_SYSFS_ROOT="$TMP/none" \
