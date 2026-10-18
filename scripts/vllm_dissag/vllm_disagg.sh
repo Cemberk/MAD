@@ -308,7 +308,12 @@ _clear_stale_jit_locks() {
     local build="${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}/build" age="" l
     [ -d "$build" ] || return 0
     [ -n "${JIT_CACHE_HOST:-}" ] && age="-mmin +${JIT_LOCK_STALE_MIN:-60}"
-    for l in $(find "$build" -maxdepth 1 -name "lock_*" $age 2>/dev/null); do
+    # Two lock levels: AITER's own per module (build/lock_<module>), and the one torch's
+    # extension builder takes inside it (build/<module>/build/lock). A job killed while
+    # building left the inner one: decode waited 40 min on module_rmsnorm/build/lock,
+    # 9 days old, and the outer-only cleanup missed it.
+    for l in $(find "$build" -maxdepth 1 -name "lock_*" $age 2>/dev/null) \
+             $(find "$build" -mindepth 3 -maxdepth 3 -path "$build/*/build/lock" $age 2>/dev/null); do
         echo "[jit-cache] $(hostname): removing stale AITER build lock $l (left $(date -r "$l" "+%F %T"))"
         rm -rf "$l"
     done

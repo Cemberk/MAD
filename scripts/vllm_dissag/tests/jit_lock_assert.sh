@@ -12,11 +12,14 @@ _has()    { grep -qF -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pa
 _hasnot() { grep -qF -- "$2" <<<"$1" && { printf "  FAIL  %s (unexpected: %s)\n" "$3" "$2"; fail=$((fail+1)); } || { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); }; }
 _func() { sed -n '/^_clear_stale_jit_locks() {/,/^}/p' "$1"; }
 
-_cache() { # <aiter_jit dir>: a stale lock (file), a stale lock (dir), a fresh lock, built modules
-    mkdir -p "$1/build/module_gemm_a8w8_blockscale" "$1/build/lock_module_moe_dir"
-    touch "$1/build/module_gemm_a8w8_blockscale/module.so" "$1/module_rmsnorm.so"
-    touch -d '3 hours ago' "$1/build/lock_module_gemm_a8w8_blockscale" "$1/build/lock_module_moe_dir"
-    touch "$1/build/lock_module_fresh"
+_cache() { # <aiter_jit dir>: stale locks (file, dir, the inner build/<module>/build/lock),
+           # fresh locks (outer and inner), built modules, a source file named lock elsewhere
+    mkdir -p "$1/build/module_gemm_a8w8_blockscale" "$1/build/lock_module_moe_dir" \
+             "$1/build/module_rmsnorm/build" "$1/build/module_fresh/build" "$1/build/module_rmsnorm/blob"
+    touch "$1/build/module_gemm_a8w8_blockscale/module.so" "$1/module_rmsnorm.so" "$1/build/module_rmsnorm/blob/lock"
+    touch -d '3 hours ago' "$1/build/lock_module_gemm_a8w8_blockscale" "$1/build/lock_module_moe_dir" \
+             "$1/build/module_rmsnorm/build/lock" "$1/build/module_rmsnorm/blob/lock"
+    touch "$1/build/lock_module_fresh" "$1/build/module_fresh/build/lock"
 }
 _left() { (cd "$1" && find . -type f -o -type d -name 'lock_*' | sort | tr '\n' ' '); }
 
@@ -29,12 +32,16 @@ for S in "$D" "$C"; do
     O="$(env -i PATH="$PATH" AITER_JIT_DIR="$TMP/$n/default" bash -c "$F
 _clear_stale_jit_locks")"
     _has "$O" "removing stale AITER build lock $TMP/$n/default/build/lock_module_gemm_a8w8_blockscale" "default cache: says which lock it removed"
-    _has "$(_left "$TMP/$n/default")" "./build/module_gemm_a8w8_blockscale/module.so ./module_rmsnorm.so " "default cache: every lock gone, built modules kept"
+    _has "$O" "removing stale AITER build lock $TMP/$n/default/build/module_rmsnorm/build/lock" "default cache: removes the inner build/<module>/build/lock too"
+    _has "$(_left "$TMP/$n/default")" "./build/module_gemm_a8w8_blockscale/module.so ./build/module_rmsnorm/blob/lock ./module_rmsnorm.so " \
+         "default cache: every lock gone, built modules and other files named lock kept"
     _cache "$TMP/$n/shared"
     env -i PATH="$PATH" AITER_JIT_DIR="$TMP/$n/shared" JIT_CACHE_HOST=/somewhere bash -c "$F
 _clear_stale_jit_locks" >/dev/null
     L="$(_left "$TMP/$n/shared")"
     _has    "$L" "./build/lock_module_fresh " "caller-set (maybe shared) cache: a fresh lock is left for its holder"
+    _has    "$L" "./build/module_fresh/build/lock " "caller-set cache: a fresh inner lock is left too"
+    _hasnot "$L" "./build/module_rmsnorm/build/lock " "caller-set cache: a 3-hour-old inner lock is removed"
     _hasnot "$L" "lock_module_gemm_a8w8_blockscale" "caller-set cache: a 3-hour-old lock is removed"
     O="$(env -i PATH="$PATH" AITER_JIT_DIR="$TMP/$n/none" bash -c "$F
 _clear_stale_jit_locks; echo rc=\$?")"
