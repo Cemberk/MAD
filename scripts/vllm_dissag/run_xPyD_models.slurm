@@ -642,6 +642,7 @@ echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT
 # cancelled job left its container holding 1535 GB on a node. docker run
 # runs in the background so the trap fires as soon as the signal lands.
 _stop_container() {
+    [ -n "$_trace_pid" ] && kill "$_trace_pid" 2>/dev/null;
     docker stop -t 10 "$DOCKER_CONT_NAME" >/dev/null 2>&1
     docker rm -f "$DOCKER_CONT_NAME" >/dev/null 2>&1
 }
@@ -666,6 +667,18 @@ echo "[mounts] site storage:${_SITE_MOUNTS:- none}"
 _EXTRA_ENV=""
 for _v in ${CONTAINER_ENV//,/ }; do _EXTRA_ENV="$_EXTRA_ENV -e $_v"; done
 [ -n "$_EXTRA_ENV" ] && echo "[env] passed into the container:${_EXTRA_ENV}"
+# Which processes take GPU memory while the servers start, sampled from the host, where
+# the kernel per-process GPU records resolve to command lines and containers (the
+# container cannot see host pids). See gpu_mem_trace.sh. Written straight into LOG_PATH:
+# the job directory under it is created by the container root user. GPU_MEM_TRACE=0
+# skips it; GPU_MEM_TRACE_SECS / GPU_MEM_TRACE_INTERVAL set its length and rate.
+_trace_pid="";
+if [ "${GPU_MEM_TRACE:-1}" = "1" ] && [ -f "$NIXL_REPO_DIR/gpu_mem_trace.sh" ]; then
+    _trace_out="${LOG_PATH}/gpu_mem_trace_${SLURM_JOB_ID}_NODE${SLURM_PROCID}.log";
+    bash "$NIXL_REPO_DIR/gpu_mem_trace.sh" "$_trace_out" </dev/null >/dev/null 2>&1 &
+    _trace_pid=$!;
+    echo "[gpu-mem-trace] $(hostname): GPU memory holders sampled into $_trace_out";
+fi
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -820,6 +833,7 @@ docker run --rm \
 _docker_pid=$!
 wait "$_docker_pid"
 _docker_rc=$?
+[ -n "$_trace_pid" ] && kill "$_trace_pid" 2>/dev/null;
 trap - TERM INT
 exit "$_docker_rc"
 '

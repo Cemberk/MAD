@@ -980,6 +980,16 @@ server hung until the 4000 s start-up timeout, and nothing named the node. Exclu
 node (`sbatch --exclude=<node>`) and report it to the cluster admins. `GPU_CLEAN_CHECK=0`
 skips the check.
 
+The check sees each node only once, before the servers start. When the error comes
+later, after the check passed, each node's `gpu_mem_trace_<job>_NODE<rank>.log` in
+`LOG_PATH` names what took the memory. The batch script samples it from the host for the
+first 15 minutes (`gpu_mem_trace.sh`), because the container cannot see host process
+ids. Each sample lists every GPU's total use and each process holding memory, with its
+command line, its container (or `host`) and its GiB per GPU, the GPUs numbered as
+vLLM's `cuda:<n>`. A sample is written only when it changes. `GPU_MEM_TRACE=0` turns it
+off; `GPU_MEM_TRACE_SECS` and `GPU_MEM_TRACE_INTERVAL` (default 900 and 5) set its
+length and rate.
+
 ## A server that dies of a GPU fault
 
 A worker that hits a GPU memory fault mid-run logs only the runtime's line
