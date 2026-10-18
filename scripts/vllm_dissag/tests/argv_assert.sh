@@ -448,6 +448,34 @@ _oom='(Worker_DP3_TP1_EP7 pid=4147) ERROR 09-30 00:44:26 torch.OutOfMemoryError:
 grep -Eq -- "$_FRE" <<<"$_oom" && { echo "  PASS  a worker's torch.OutOfMemoryError is fatal"; pass=$((pass+1)); } || { echo "  FAIL  a worker's torch.OutOfMemoryError is fatal"; fail=$((fail+1)); }
 grep -Eq -- "$_FRE" <<<"INFO 09-30 00:17:10 [gpu_worker.py:491] Initial free memory 172.74 GiB" && { echo "  FAIL  an ordinary memory INFO line is not fatal"; fail=$((fail+1)); } || { echo "  PASS  an ordinary memory INFO line is not fatal"; pass=$((pass+1)); }
 
+for _l in '(Worker pid=2581) ERROR 10-18 06:41:28 [multiproc_executor.py:898] WorkerProc failed to start.' \
+          '(EngineCore_DP12 pid=430) Exception: WorkerProc initialization failed due to an exception in a background process. See stack trace for root cause.'; do
+    grep -Eq -- "$_FRE" <<<"$_l" && { echo "  PASS  fatal: ${_l:0:60}..."; pass=$((pass+1)); } || { echo "  FAIL  fatal: ${_l:0:60}..."; fail=$((fail+1)); }
+done
+
+echo "=== the start-up watch notices a server that died on another node ==="
+# C3 (2 decode nodes): a worker died on decode NODE3 while the wait watched decode NODE2,
+# and the job sat 70 min in start-up.
+_WT="$(mktemp -d)"; mkdir -p "$_WT/7"
+_WFUNCS="$(sed -n '/^_FATAL_SERVER_LOG_RE=/p' "$DIR/vllm_disagg.sh"; sed -n '/^_print_log_tail() {/,/^}/p;/^_wait_log_signal_or_fail() {/,/^}/p' "$DIR/vllm_disagg.sh")"
+printf 'INFO loading\n' > "$_WT/7/decode_NODE2.log"; printf 'INFO up\nApplication startup complete.\n' > "$_WT/7/prefill_NODE0.log"
+printf '(Worker pid=2581) ERROR WorkerProc failed to start.\nValueError: Free memory on device cuda:4 (140.65/191.98 GiB) on startup is less than desired\n' > "$_WT/7/decode_NODE3.log"
+_t0=$(date +%s)
+_WO="$(env -i PATH="$PATH" JOB_ABORT_FILE="$_WT/7/ABORTED" bash -c "$_WFUNCS
+_job_fail() { echo \"JOBFAIL: \$1\"; exit 3; }
+_wait_log_signal_or_fail $_WT/7/decode_NODE2.log 'decode master' 'Application startup complete.' 60 1" 2>&1)"
+_wt=$(( $(date +%s) - _t0 ))
+_has "$_WO" "JOBFAIL: decode master failed to start after 0s: a server died (see the log tail above): $_WT/7/decode_NODE3.log" \
+     "a worker dead on decode NODE3 fails the wait on decode NODE2 at once"
+_has "$_WO" "Free memory on device cuda:4" "the dead server's own error is printed"
+_has "took<5s=$([ "$_wt" -lt 5 ] && echo yes || echo no)" "took<5s=yes" "no waiting for the timeout"
+rm -f "$_WT/7/decode_NODE3.log"; printf 'Application startup complete.\n' >> "$_WT/7/decode_NODE2.log"
+_WO="$(env -i PATH="$PATH" JOB_ABORT_FILE="$_WT/7/ABORTED" bash -c "$_WFUNCS
+_job_fail() { echo \"JOBFAIL: \$1\"; exit 3; }
+_wait_log_signal_or_fail $_WT/7/decode_NODE2.log 'decode master' 'Application startup complete.' 60 1" 2>&1)"
+_has "$_WO" "Ready: decode master" "healthy servers: the wait returns ready"
+rm -rf "$_WT"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"

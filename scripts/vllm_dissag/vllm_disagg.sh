@@ -202,8 +202,12 @@ JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID}/ABORTED"
 # the engine hung rather than exited, so neither engine line ever appears: two runs
 # failed their first all-reduce ~17 min in and waited out the 4000s. A worker that runs
 # out of GPU memory during start-up does the same: one decode worker's OOM in cudagraph
-# capture left the engine waiting ~55 min for vLLM's own engine-ready timeout.
-_FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to start|RuntimeError: NCCL error|\[FATAL ERROR\]: HIP failure|torch\.OutOfMemoryError'
+# capture left the engine waiting ~55 min for vLLM's own engine-ready timeout. A
+# data-parallel engine on a second node whose worker fails ("WorkerProc failed to
+# start", e.g. "Free memory on device ... less than desired") prints neither engine
+# line either: its API server runs on the first node, and the other 15 EP ranks wait for
+# it at MoRI's barrier, so one 4-node job sat 70 min in start-up.
+_FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to start|WorkerProc failed to start|WorkerProc initialization failed|RuntimeError: NCCL error|\[FATAL ERROR\]: HIP failure|torch\.OutOfMemoryError'
 
 # The last lines of a dead vLLM server are the API server's traceback, which only says
 # "See root cause above"; the worker exception and RCCL's own NCCL WARN lines come
@@ -373,9 +377,15 @@ _wait_log_signal_or_fail() {
     until grep -Fq "${SEARCH_SIGNAL}" "${LOG_FILE}" 2>/dev/null; do
         # A dead server never logs the signal; it used to take the full timeout to
         # notice (the Kimi-K3 prefill died at 17:16 and the wait gave up at 17:55).
-        if grep -Eq "${_FATAL_SERVER_LOG_RE}" "${LOG_FILE}" 2>/dev/null; then
-            _print_log_tail "${LOG_FILE}" "${LABEL}"
-            _job_fail "${LABEL} failed to start after ${ELAPSED}s (see the log tail above): ${LOG_FILE}"
+        # Every server of the job is checked, not only the one waited on: a prefill or
+        # decode instance spans several nodes, each with its own log, and a worker that
+        # dies on a node other than the master leaves the master waiting, not exiting.
+        local _dead
+        _dead="$(grep -lE "${_FATAL_SERVER_LOG_RE}" "${LOG_FILE}" "${LOG_FILE%/*}"/prefill_NODE*.log \
+            "${LOG_FILE%/*}"/decode_NODE*.log 2>/dev/null | head -n 1)"
+        if [ -n "${_dead}" ]; then
+            _print_log_tail "${_dead}" "${_dead##*/}"
+            _job_fail "${LABEL} failed to start after ${ELAPSED}s: a server died (see the log tail above): ${_dead}"
         fi
         if [ -f "${JOB_ABORT_FILE}" ]; then
             _job_fail "stopped waiting for ${LABEL}: $(head -n1 "${JOB_ABORT_FILE}")"
