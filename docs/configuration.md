@@ -323,8 +323,6 @@ MI300X RoCEv2 fabric) and are kept out of the image so a different cluster needs
 | `MORI_IB_ENABLE_RELAXED_ORDERING` | `1` |
 | `MORI_IB_GID_INDEX` | `1` |
 | `MORI_NUM_QP_PER_PE` | `8` |
-| `VLLM_MORIIO_QP_PER_TRANSFER` | `2` |
-| `VLLM_MORIIO_NUM_WORKERS` | `4` |
 | `HSA_FORCE_FINE_GRAIN_PCIE` | `1` |
 | `HSA_ENABLE_SDMA` | `1` |
 
@@ -350,7 +348,8 @@ Inside the container, the connector scripts fill every name nobody else set, wit
 | `VLLM_ROCM_USE_AITER_MLA` | `1` |
 | `NCCL_IB_HCA`, `MORI_RDMA_DEVICES` | `mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9` |
 | `NCCL_IB_GID_INDEX`, `MORI_IB_GID_INDEX` | `3` |
-| `MORI_NUM_QP_PER_PE`, `VLLM_MORIIO_QP_PER_TRANSFER` | `4` |
+| `MORI_NUM_QP_PER_PE` | `4` |
+| `VLLM_MORIIO_QP_PER_TRANSFER`, `_NUM_WORKERS`, `_POST_BATCH_SIZE` | unset (connector defaults 1, 1, -1); passed in `kv_connector_extra_config` when exported |
 | `MORI_SHMEM_HEAP_SIZE` | `17179869184` (16 GiB) |
 | `KV_BLOCK_SIZE` (wideEP) | `1` |
 | `KV_CACHE_DTYPE` (wideEP) | `fp8` |

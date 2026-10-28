@@ -692,8 +692,6 @@ Environment (`env:`):
 | `DECODE_MORI_BACKEND` | `mori_low_latency` | |
 | `MORI_SHMEM_HEAP_SIZE` | `17179869184` | 16 GiB |
 | `MORI_NUM_QP_PER_PE` | `8` | |
-| `VLLM_MORIIO_QP_PER_TRANSFER` | `2` | |
-| `VLLM_MORIIO_NUM_WORKERS` | `4` | |
 | `VLLM_ENGINE_READY_TIMEOUT_S` | `3600` | |
 | `DISTRIBUTED_TIMEOUT_SECONDS` | `7200` | |
 
@@ -739,8 +737,10 @@ Environment that differs from, or adds to, `Kimi-K3`:
 | `MORI_IB_ENABLE_RELAXED_ORDERING`, `MORI_IO_SL` | `1`, `1` | |
 | `K3_CHUNK_GATE_SLACK` | `2` | K3 gate knob |
 
-It does not set `VLLM_MORIIO_NUM_WORKERS`, `VLLM_ENGINE_READY_TIMEOUT_S` or
-`DISTRIBUTED_TIMEOUT_SECONDS`; those come from `moriio.env` and the connector defaults.
+It does not set `VLLM_ENGINE_READY_TIMEOUT_S` or `DISTRIBUTED_TIMEOUT_SECONDS`; those come from
+`moriio.env` and the connector defaults. MoRIIO transfer tuning (`VLLM_MORIIO_QP_PER_TRANSFER`,
+`_NUM_WORKERS`, `_POST_BATCH_SIZE`) is unset, so the connector uses 1 QP and 1 worker, as the
+validated runs did.
 
 **The read-after-write barrier.** `K3_WRITE_READBACK=1` forces the written KV to be globally visible
 in the receiver's memory before `write_done`. It fixes a prefill-to-decode write race seen as

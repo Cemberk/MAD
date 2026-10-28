@@ -476,6 +476,31 @@ _wait_log_signal_or_fail $_WT/7/decode_NODE2.log 'decode master' 'Application st
 _has "$_WO" "Ready: decode master" "healthy servers: the wait returns ready"
 rm -rf "$_WT"
 
+echo ""
+echo "=== MoRIIO transfer tuning reaches the connector config, only when set ==="
+# The connector ignores VLLM_MORIIO_QP_PER_TRANSFER / _NUM_WORKERS / _POST_BATCH_SIZE as
+# environment variables ("deprecated and ignored"); they must be in kv_connector_extra_config.
+_argv_tune() { # rank [VAR=value ...] -> argv of the DeepSeek-V3 wideEP moriio server
+  local r="$1"; shift
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK="$r" xP=1 yD=1 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+    MODEL_NAME=DeepSeek-V3 MODEL_PATH=/m/DSV3 MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 "$@" \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+T0="$(_argv_tune 0)"
+_hasnot "$T0" '"qp_per_transfer"' "unset: no qp_per_transfer key (connector default 1, as every validated run)"
+_hasnot "$T0" '"num_workers"' "unset: no num_workers key"
+_hasnot "$T0" '"post_batch_size"' "unset: no post_batch_size key"
+T1="$(_argv_tune 1 VLLM_MORIIO_QP_PER_TRANSFER=2 VLLM_MORIIO_NUM_WORKERS=4 VLLM_MORIIO_POST_BATCH_SIZE=-1)"
+_has "$T1" '"qp_per_transfer":2' "set: qp_per_transfer is an integer in kv_connector_extra_config (decode)"
+_has "$T1" '"num_workers":4' "set: num_workers in kv_connector_extra_config"
+_has "$T1" '"post_batch_size":-1' "set: post_batch_size accepts -1"
+_has "$(_argv_tune 0 VLLM_MORIIO_QP_PER_TRANSFER=2)" '"qp_per_transfer":2' "set: prefill gets it too"
+_hasnot "$(cat "$DIR/connectors/moriio.env")" "VLLM_MORIIO_QP_PER_TRANSFER=" "moriio.env no longer sets a value the connector ignores"
+_hasnot "$(cat "$DIR/models.yaml")" "VLLM_MORIIO_" "no recipe sets the ignored VLLM_MORIIO_* tuning variables"
+_has "$(cat "$DIR/run_xPyD_models.slurm")" '${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=' "slurm forwards VLLM_MORIIO_POST_BATCH_SIZE"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"

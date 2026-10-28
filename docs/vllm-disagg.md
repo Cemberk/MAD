@@ -614,10 +614,13 @@ cluster-specific; override per fabric by exporting the same name:
 | `MORI_IB_ENABLE_RELAXED_ORDERING` | `1` |
 | `MORI_IB_GID_INDEX` | `1` |
 | `MORI_NUM_QP_PER_PE` | `8` |
-| `VLLM_MORIIO_QP_PER_TRANSFER` | `2` |
-| `VLLM_MORIIO_NUM_WORKERS` | `4` |
 | `HSA_FORCE_FINE_GRAIN_PCIE` | `1` |
 | `HSA_ENABLE_SDMA` | `1` |
+
+The MoRIIO transfer tuning — `VLLM_MORIIO_QP_PER_TRANSFER`, `VLLM_MORIIO_NUM_WORKERS`,
+`VLLM_MORIIO_POST_BATCH_SIZE` — is not set by default. The connector reads these only from
+`kv_connector_extra_config` (it ignores them as environment variables), so the launcher puts each
+one there when you export it; unset, the connector uses 1 QP, 1 worker and -1.
 
 The moriio connector's own fallbacks, used when nothing else sets a value, include
 `NCCL_IB_HCA` and `MORI_RDMA_DEVICES` of `mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9`,

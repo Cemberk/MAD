@@ -79,8 +79,9 @@ connector_setup_env() {
     export MORI_RDMA_SL="${MORI_RDMA_SL:-0}"
 
     export MORI_NUM_QP_PER_PE="${MORI_NUM_QP_PER_PE:-4}"
-    export VLLM_MORIIO_QP_PER_TRANSFER="${VLLM_MORIIO_QP_PER_TRANSFER:-4}"
-    export VLLM_MORIIO_NUM_WORKERS="${VLLM_MORIIO_NUM_WORKERS:-4}"
+    # VLLM_MORIIO_QP_PER_TRANSFER / _NUM_WORKERS / _POST_BATCH_SIZE are not read from the
+    # environment by the MoRIIO connector ("deprecated and ignored"); they go into
+    # kv_connector_extra_config (_moriio_build_kv_transfer_config), and only when set.
 
     export VLLM_MORIIO_TRANSFER_TIMEOUT_S="${VLLM_MORIIO_TRANSFER_TIMEOUT_S:-600}"
     export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
@@ -128,7 +129,19 @@ _moriio_build_kv_transfer_config() {
     if [[ "${kv_role}" == "kv_producer" ]]; then _peer="${DECODE_POD_HOSTS:-}"; else _peer="${PREFILL_POD_HOSTS:-}"; fi
     local _pod_hosts=""
     [[ -n "${_peer}" ]] && _pod_hosts=',"moriio_pod_hosts":"'"${_peer}"'"'
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}"'}}'
+    # Transfer tuning. The connector reads these keys only from this config: the
+    # VLLM_MORIIO_* environment variables of the same names are "deprecated and
+    # ignored" by it, so for a long time the 2 QPs / 4 workers set in moriio.env and in
+    # recipes never took effect, and every run used its defaults (1 / 1 / -1). Each key
+    # is emitted only when its variable is set, so the default config is unchanged.
+    local _tune="" _k _v
+    for _k in QP_PER_TRANSFER:qp_per_transfer NUM_WORKERS:num_workers POST_BATCH_SIZE:post_batch_size; do
+        _v="VLLM_MORIIO_${_k%%:*}"; _v="${!_v:-}"
+        [[ -z "${_v}" ]] && continue
+        [[ "${_v}" =~ ^-?[0-9]+$ ]] || { echo "Error: VLLM_MORIIO_${_k%%:*}='${_v}' is not an integer." >&2; exit 1; }
+        _tune+=',"'"${_k#*:}"'":'"${_v}"
+    done
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
 }
 
 connector_runtime_patch() {

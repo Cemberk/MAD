@@ -353,8 +353,6 @@ _kimi_k3_recipe_env: &kimi_k3_recipe_env
   DECODE_MORI_BACKEND: "mori_low_latency"
   MORI_SHMEM_HEAP_SIZE: "17179869184"
   MORI_NUM_QP_PER_PE: "8"
-  VLLM_MORIIO_QP_PER_TRANSFER: "2"
-  VLLM_MORIIO_NUM_WORKERS: "4"
   VLLM_ENGINE_READY_TIMEOUT_S: "3600"
   DISTRIBUTED_TIMEOUT_SECONDS: "7200"
 
@@ -460,9 +458,8 @@ _kimik3_recipe_env: &kimik3_recipe_env
   # MoRI RDMA knobs (moriio.env-only -> did not propagate interactively):
   MORI_IB_ENABLE_RELAXED_ORDERING: "1"
   MORI_IO_SL: "1"
-  # MoRI QP counts: moriio.sh defaults (4) are BELOW PR241; pin to PR241 values:
+  # MoRI QP count: moriio.sh default (4) is below PR241; pin to PR241 value:
   MORI_NUM_QP_PER_PE: "8"
-  VLLM_MORIIO_QP_PER_TRANSFER: "2"
   # K3 gate knob:
   K3_CHUNK_GATE_SLACK: "2"
   # Sleep-fence duration; INERT now that K3_WRITE_FENCE=0 (readback is the active path on v4). Kept for reference.
@@ -521,8 +518,6 @@ _kimi_k3_mi355x_recipe_env: &kimi_k3_mi355x_recipe_env
   DECODE_MORI_BACKEND: "mori_low_latency"
   MORI_SHMEM_HEAP_SIZE: "17179869184"
   MORI_NUM_QP_PER_PE: "8"
-  VLLM_MORIIO_QP_PER_TRANSFER: "2"
-  VLLM_MORIIO_NUM_WORKERS: "4"
   VLLM_ENGINE_READY_TIMEOUT_S: "3600"
   DISTRIBUTED_TIMEOUT_SECONDS: "7200"
 
