@@ -576,6 +576,21 @@ The RDMA one deserves emphasis: it is per-node and self-propagating, so it prese
 intermittent multinode failure. A node that has never run the launcher works; one that has, and
 lacked the library, fails every time after.
 
+**Open: recall at concurrency above 1 on the disaggregated recipes.** The image's vLLM
+(`raviguptaamd/vllm@862bfd8`, 2026-08-11) predates four fixes for requests that share a decode
+batch:
+- zeroing KDA (mamba) state blocks when they are recycled;
+- de-aliasing the KDA decode state-index view;
+- trimming the MoRI-EP dispatch output to valid tokens;
+- having the MoRIIO connector wait for every KV group's transfer.
+
+They are in `raviguptaamd/vllm@206fffe` (2026-09-13), together with the int4-SiTU MoE restore on
+gfx942 and the MoRI `combine()` fix for 4P/4D. Without them, NIAH recall can drop well below 100%
+once several requests decode together; the single-request NIAH cards don't show it. Moving the
+image to `206fffe` also moves the base image, MoRI and AITER, so it is a separate change that needs
+its own validation above concurrency 1. Until then, read disaggregated Kimi-K3 accuracy above
+concurrency 1 with this in mind.
+
 ### Where the configuration lives
 
 Nothing K3-specific is baked into the image.

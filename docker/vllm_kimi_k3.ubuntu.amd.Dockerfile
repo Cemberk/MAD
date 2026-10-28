@@ -199,7 +199,9 @@ assert f, 'aiter.ops.triton.conv missing'; print('AITER OK', v, '+ flydsl 0.2.4'
 #    metadata - removed).
 # -----------------------------------------------------------------------------
 ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
-# branch kimi-k3-wideep-disagg-fullsource-v3 @ 2026-08-11
+# branch kimi-k3-wideep-disagg-fullsource-v3 @ 2026-08-11. Lacks the concurrency > 1 accuracy fixes
+# that are in 206fffe (2026-09-13); see "Open: recall at concurrency above 1" in docs/kimi-k3.md.
+# Moving to it also moves the base image, MoRI and AITER, so it needs its own validation.
 ARG VLLM_REF=862bfd8ca4db78b9cbcbcf9ec6013638e3ae6543
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${K3_GFX_ARCH} \
