@@ -501,6 +501,33 @@ _hasnot "$(cat "$DIR/connectors/moriio.env")" "VLLM_MORIIO_QP_PER_TRANSFER=" "mo
 _hasnot "$(cat "$DIR/models.yaml")" "VLLM_MORIIO_" "no recipe sets the ignored VLLM_MORIIO_* tuning variables"
 _has "$(cat "$DIR/run_xPyD_models.slurm")" '${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=' "slurm forwards VLLM_MORIIO_POST_BATCH_SIZE"
 
+echo ""
+echo "=== every multi-node card tells madengine where its results are ==="
+# For a multi-node job madengine records results only from the card's multiple_results CSV
+# (or performance: lines, which these launchers do not print); without it a run records nothing.
+# The launchers publish perf_<MODEL_NAME>.csv into the job directory.
+for _cat in "$DIR/models.json" "$DIR/../sglang_disagg/models.json" "$DIR/../vllm_multinode/models.json"; do
+  _bad="$(python3 - "$_cat" <<'PY'
+import json, os, sys, yaml
+cat = sys.argv[1]
+def model_name(c):
+    env = c.get("env_vars", {})
+    if env.get("MODEL_NAME"):
+        return env["MODEL_NAME"]
+    # A card may take MODEL_NAME from its layered mad-config (madengine applies model.env).
+    if env.get("MAD_CONFIG"):
+        y = yaml.safe_load(open(os.path.join(os.path.dirname(cat), env["MAD_CONFIG"]))) or {}
+        return ((y.get("model") or {}).get("env") or {}).get("MODEL_NAME")
+bad = [c["name"] for c in json.load(open(cat))
+       if c.get("multiple_results") != "perf_%s.csv" % model_name(c)]
+print(" ".join(bad) or "none")
+PY
+)"
+  _has "$_bad" "none" "$(basename "$(dirname "$_cat")")/models.json: every card declares multiple_results=perf_<MODEL_NAME>.csv"
+done
+_has "$(cat "$DIR/run_xPyD_models.slurm")" '_PERF_DST="$(pwd)/perf_${MODEL_NAME}.csv"' "vllm_dissag launcher publishes perf_<MODEL_NAME>.csv"
+_has "$(cat "$DIR/../sglang_disagg/run_xPyD_models.slurm")" '"$(pwd)/perf_${MODEL_NAME}.csv"' "sglang_disagg launcher publishes perf_<MODEL_NAME>.csv"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"

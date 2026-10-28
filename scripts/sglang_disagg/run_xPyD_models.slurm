@@ -616,6 +616,12 @@ if [ "${SKIP_BENCHMARK}" != "1" ] && [ ! -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.cs
     exit 1
 fi
 if [ -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" ]; then
+    # Publish it where madengine collects it: a card's `multiple_results` is resolved
+    # against the job directory madengine launched us from (this script's working
+    # directory), not $LOG_PATH. Without it a multi-node run records no result at all.
+    # Same name as the vLLM launchers: perf_<MODEL_NAME>.csv.
+    cp "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" \
+        && echo "perf CSV -> $(pwd)/perf_${MODEL_NAME}.csv"
     _failed="$(cluster_perf_failures "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" || true)"
     if [ "${_failed:-0}" -gt 0 ] 2>/dev/null; then
         echo "ERROR: ${_failed} row(s) of ${LOG_PATH}/${SLURM_JOB_ID}/perf.csv are FAILURE; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
