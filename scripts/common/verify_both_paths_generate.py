@@ -6,17 +6,21 @@ madengine   : madengine slurm_multi generates madengine_<name>.sh, which runs th
 Runs died because the madengine half could not even write its script when the card
 name was namespaced. This drives the real generator against the real
 card, so a regression on either side shows up without a cluster.
+
+Needs madengine importable: installed, or a checkout's src/ in MADENGINE_SRC.
+Usage: python3 scripts/common/verify_both_paths_generate.py   (from any directory)
 """
 import json, sys, tempfile, os
 from pathlib import Path
-sys.path.insert(0, "/home/madengine/src")
+if os.environ.get("MADENGINE_SRC"):
+    sys.path.insert(0, os.environ["MADENGINE_SRC"])
 
-MAD = "/tmp/madtest/MAD_pr242"
+MAD = str(Path(__file__).resolve().parents[2])   # this repo's root
 CARD_DIR = f"{MAD}/scripts/vllm_multinode"
 cards = {c["name"]: c for c in json.load(open(f"{CARD_DIR}/models.json"))}
 card = cards["pyt_vllm_kimi-k3_mi300x_pp2xtp8"]
 
-# Namespaced exactly as madengine's discovery names a nested card -- the shape that broke 62.
+# Namespaced exactly as madengine's discovery names a nested card -- the shape that broke runs.
 NS = "vllm_multinode/pyt_vllm_kimi-k3_mi300x_pp2xtp8"
 model = dict(card); model["name"] = NS
 
@@ -25,7 +29,7 @@ from madengine.deployment.slurm import SlurmDeployment
 work = tempfile.mkdtemp()
 manifest = {"built_models": {NS: model}, "built_images": {}, "context": {},
             "deployment_config": {"target": "slurm",
-                                  "slurm": {"partition": "amd-rccl", "nodes": 2,
+                                  "slurm": {"partition": "<partition>", "nodes": 2,
                                             "gpus_per_node": 8, "time": "04:00:00",
                                             "output_dir": f"{work}/slurm_results"},
                                   "distributed": {"launcher": "slurm_multi", "nnodes": 2}}}
