@@ -44,8 +44,8 @@ _has    "$O" "used per GPU: 0000:11:00.0=40GiB 0000:2f:00.0=0GiB" "each sample h
 _has    "$(grep -c '^=== ' <<<"$O")" "1" "an unchanged sample is not written again"
 # A holder that appears while sampling gets its own sample.
 rm -f "$K/proc/4200/vram_51234"
-( sleep 1.5; echo $((7 << 30)) > "$K/proc/4200/vram_51234" ) &
-O="$(_trace 3)"; wait
+( sleep 0.5; echo $((7 << 30)) > "$K/proc/4200/vram_51234" ) &
+O="$(_trace 5)"; wait   # margin: each sample forks several tools, slow under load
 _has "$(grep -c '^=== ' <<<"$O")" "2" "a change writes a new sample"
 _has "$O" "pid 4200 [host] VLLM::Worker_TP0: GPU0 (0000:11:00.0)=7GiB" "a host process is marked as such; a renamed process loses its space padding"
 # Without the kernel tree (no KFD), it still writes its header and exits on time.
