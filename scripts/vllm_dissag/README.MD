@@ -143,7 +143,7 @@ can reach.
 ## Quick start
 
 To run a card through madengine or with `sbatch` directly, with a cluster's allocation
-defaults, see [scripts/common/README.md](../common/README.md).
+defaults, see [docs/multinode-running.md](../../docs/multinode-running.md).
 
 ```bash
 git clone https://github.com/ROCm/MAD.git
