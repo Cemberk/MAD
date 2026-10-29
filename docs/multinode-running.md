@@ -430,6 +430,11 @@ sbatch --partition=amd-rccl --nodes=2 --ntasks=2 --gpus-per-node=8 --exclusive \
   `/shared_inference/%u/model_blog_logs/slurm-%j.out` and `.err`. Your command-line
   options override them.
 
+- **Results:** rank 0 writes `perf.csv` to `$LOG_PATH/<job id>/` (see [Logs](#logs)), and
+  copies it into the directory the job was started from as `perf_<MODEL_NAME>.csv`, the
+  file the card's `multiple_results` names. The job exits non-zero when a row is
+  `FAILURE` or there are no results, so `sacct` shows the same verdict madengine would.
+
 A colocated card, for example the Kimi-K3 PP2 x TP8 baseline:
 
 ```bash

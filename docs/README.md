@@ -4,10 +4,16 @@ MAD (Model Automation and Dashboarding) is a curated list of AI models that run 
 architectures while tracking performance and generating dashboards for insights. It provides deep
 learning recipes for training, inference and deployment on AMD Instinct GPUs.
 
-You do not run MAD directly. You run it with **madengine**, a command-line tool from
+You run MAD with **madengine**, a command-line tool from
 [ROCm/madengine](https://github.com/ROCm/madengine). madengine reads the model definitions in this
 repository, builds a Docker image for each model, runs the model's script inside a container (or
 submits it to a SLURM or Kubernetes cluster), and writes the results to a CSV file.
+
+Multinode cards can also run without madengine: their launchers take only environment variables,
+so you can submit one with `sbatch` or run it inside `salloc`
+([multinode-running.md](multinode-running.md#with-sbatch-directly)), or submit it to Kubernetes with
+`scripts/common/k8s/submit.py` ([multinode-kubernetes.md](multinode-kubernetes.md#submitting-standalone)).
+Both paths run the same launcher and write the same `perf.csv`.
 
 This folder is a guide from first contact to writing your own workloads. Start at step 1 of the
 learning path and stop when you have what you need.
