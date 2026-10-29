@@ -670,10 +670,11 @@ for _v in ${CONTAINER_ENV//,/ }; do _EXTRA_ENV="$_EXTRA_ENV -e $_v"; done
 # Which processes take GPU memory while the servers start, sampled from the host, where
 # the kernel per-process GPU records resolve to command lines and containers (the
 # container cannot see host pids). See gpu_mem_trace.sh. Written straight into LOG_PATH:
-# the job directory under it is created by the container root user. GPU_MEM_TRACE=0
-# skips it; GPU_MEM_TRACE_SECS / GPU_MEM_TRACE_INTERVAL set its length and rate.
+# the job directory under it is created by the container root user. Off unless
+# GPU_MEM_TRACE=1 (a diagnostic for start-up memory failures); GPU_MEM_TRACE_SECS /
+# GPU_MEM_TRACE_INTERVAL set its length and rate.
 _trace_pid="";
-if [ "${GPU_MEM_TRACE:-1}" = "1" ] && [ -f "$NIXL_REPO_DIR/gpu_mem_trace.sh" ]; then
+if [ "${GPU_MEM_TRACE:-0}" = "1" ] && [ -f "$NIXL_REPO_DIR/gpu_mem_trace.sh" ]; then
     _trace_out="${LOG_PATH}/gpu_mem_trace_${SLURM_JOB_ID}_NODE${SLURM_PROCID}.log";
     bash "$NIXL_REPO_DIR/gpu_mem_trace.sh" "$_trace_out" </dev/null >/dev/null 2>&1 &
     _trace_pid=$!;

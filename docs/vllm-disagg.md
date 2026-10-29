@@ -984,13 +984,15 @@ node (`sbatch --exclude=<node>`) and report it to the cluster admins. `GPU_CLEAN
 skips the check.
 
 The check sees each node only once, before the servers start. When the error comes
-later, after the check passed, each node's `gpu_mem_trace_<job>_NODE<rank>.log` in
-`LOG_PATH` names what took the memory. The batch script samples it from the host for the
-first 15 minutes (`gpu_mem_trace.sh`), because the container cannot see host process
-ids. Each sample lists every GPU's total use and each process holding memory, with its
+later, after the check passed, rerun with `GPU_MEM_TRACE=1`: each node's
+`gpu_mem_trace_<job>_NODE<rank>.log` in `LOG_PATH` then names what took the memory. The
+batch script samples it from the host for the first 15 minutes (`gpu_mem_trace.sh`),
+because the container cannot see host process ids. If it shows no process holding the
+memory the vLLM error reports, the driver's free-memory figure is wrong on that node;
+exclude it. Each sample lists every GPU's total use and each process holding memory, with its
 command line, its container (or `host`) and its GiB per GPU, the GPUs numbered as
-vLLM's `cuda:<n>`. A sample is written only when it changes. `GPU_MEM_TRACE=0` turns it
-off; `GPU_MEM_TRACE_SECS` and `GPU_MEM_TRACE_INTERVAL` (default 900 and 5) set its
+vLLM's `cuda:<n>`. A sample is written only when it changes. It is off by default;
+`GPU_MEM_TRACE_SECS` and `GPU_MEM_TRACE_INTERVAL` (default 900 and 5) set its
 length and rate.
 
 ## A server that dies of a GPU fault

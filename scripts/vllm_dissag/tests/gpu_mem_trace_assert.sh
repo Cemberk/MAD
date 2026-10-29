@@ -60,7 +60,7 @@ echo "=== run_xPyD_models.slurm ==="
 S="$(cat "$DIR/run_xPyD_models.slurm")"
 _has "$S" 'bash "$NIXL_REPO_DIR/gpu_mem_trace.sh" "$_trace_out" </dev/null >/dev/null 2>&1 &' \
      "the tracer runs in the background, off the job's output"
-_has "$S" 'if [ "${GPU_MEM_TRACE:-1}" = "1" ]' "GPU_MEM_TRACE=0 turns it off"
+_has "$S" 'if [ "${GPU_MEM_TRACE:-0}" = "1" ]' "off unless GPU_MEM_TRACE=1"
 _has "$(sed -n '/^wait "\$_docker_pid"$/,/^exit "\$_docker_rc"$/p' <<<"$S")" 'kill "$_trace_pid"' \
      "it is stopped when the container ends"
 _has "$(sed -n '/^_stop_container() {$/,/^}$/p' <<<"$S")" 'kill "$_trace_pid"' "it is stopped when the job is cancelled"
