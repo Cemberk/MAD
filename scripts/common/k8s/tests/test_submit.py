@@ -77,6 +77,14 @@ class TestSubmitDryRun(unittest.TestCase):
         self.assertRegex(out["name"], r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
         self.assertLessEqual(len(out["name"]) + 2, 63)
 
+    def test_pull_secret_defaults_as_madengine_and_can_be_cleared(self):
+        _, _, pod, _ = dry_run()
+        self.assertEqual(pod["imagePullSecrets"], [{"name": "dockerhub-rocm"}])
+        _, _, pod, _ = dry_run(config={"k8s": {"secrets": {"image_pull_secret_names": ["mine"]}}})
+        self.assertEqual(pod["imagePullSecrets"], [{"name": "mine"}])
+        _, _, pod, _ = dry_run(config={"k8s": {"secrets": {"image_pull_secret_names": []}}})
+        self.assertNotIn("imagePullSecrets", pod)
+
 
 class TestVerdict(unittest.TestCase):
     def setUp(self):

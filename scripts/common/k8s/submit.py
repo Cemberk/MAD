@@ -22,7 +22,8 @@ k8s.json holds the same keys as madengine's "k8s" block (kubeconfig, context,
 namespace, gpu_count, volumes, extra_resources, security_context, shm_size,
 node_selector, tolerations, host_network, pod_annotations, image_pull_policy,
 results_access_mode, *_results_storage_class, include_script_dirs,
-ttl_seconds_after_finished, secrets.image_pull_secret_names), plus optional
+ttl_seconds_after_finished, secrets.image_pull_secret_names -- default
+["dockerhub-rocm"], as in madengine), plus optional
 "env_vars" and "distributed": {"nnodes": N} -- so one file can drive both paths.
 
 Results: the run's perf.csv and logs are copied to --output-dir (default
@@ -42,6 +43,9 @@ import sys
 import tarfile
 import time
 from pathlib import Path
+
+# madengine's default pull secret (deployment/k8s_secrets.py).
+DEFAULT_IMAGE_PULL_SECRET_NAMES = ["dockerhub-rocm"]
 
 HERE = Path(__file__).resolve().parent
 AGENT_PORT = 29711
@@ -208,7 +212,9 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
         pod["nodeSelector"] = k8s["node_selector"]
     if k8s.get("tolerations"):
         pod["tolerations"] = k8s["tolerations"]
-    pulls = (k8s.get("secrets") or {}).get("image_pull_secret_names") or []
+    # madengine's default when the key is absent; an explicit list (even []) wins.
+    pulls = {"image_pull_secret_names": DEFAULT_IMAGE_PULL_SECRET_NAMES,
+             **(k8s.get("secrets") or {})}["image_pull_secret_names"] or []
     if pulls:
         pod["imagePullSecrets"] = [{"name": n} for n in pulls]
 

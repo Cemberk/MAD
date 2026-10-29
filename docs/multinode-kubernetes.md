@@ -155,7 +155,7 @@ drives either path:
 | `results_access_mode` | Default `ReadWriteMany` for more than one pod, `ReadWriteOnce` for one |
 | `include_script_dirs` | Directories shipped with the card's own. Default: its sibling `common`. The colocated launcher also needs `scripts/vllm_dissag` (recipes, benchmarks, parser) |
 | `ttl_seconds_after_finished` | Delete the Job this long after it ends |
-| `secrets.image_pull_secret_names` | Pull secrets for a private registry |
+| `secrets.image_pull_secret_names` | Pull secrets for a private registry (default `["dockerhub-rocm"]`, as in madengine; `[]` for none) |
 
 Outside the `k8s` block:
 
