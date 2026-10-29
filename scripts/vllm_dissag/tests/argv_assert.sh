@@ -64,7 +64,7 @@ echo "=== moriio + wideEP (Kimi-K3, gfx942 a8w4 SiTUv2) ==="
 # Kimi-K3 on gfx942 must requantise the MoE to int4: without --quantization-config
 # the a16w4 SiTUv2 heuristic kernel cannot be codegen'd and vLLM dies with
 # "LLVM ERROR: Do not know how to expand this operator's operand!" inside
-# determine_available_memory (benchmark/kimi_k3/mi300x/README.md:160).
+# determine_available_memory (docs/kimi-k3.md, Known failure modes).
 K="$(_argv_at 0 moriio 1 mori Kimi-K3 /m/Kimi-K3)"
 _has    "$K" "--quantization-config" "prefill: has --quantization-config"
 _has    "$K" "int4_per_group_32" "prefill: MoE requantised to int4_per_group_32"

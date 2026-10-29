@@ -778,7 +778,7 @@ Weakest first:
    Only names on the batch script's forward list reach the container. madengine preset
    `env_vars` are not passed to `slurm_multi` cards.
 
-The short form in [`scripts/common/README.md`](../scripts/common/README.md) is: `cluster.sh`
+In short: `cluster.sh`
 defaults, then the recipe, then the card's `env_vars`, then anything you set yourself. The long
 form above adds that a name `cluster.sh` sets and the batch script forwards is already present
 when the recipe is read.

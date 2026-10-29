@@ -125,7 +125,6 @@ at start-up.
 ## Quick start
 
 To run a card through madengine, or with `sbatch` and a cluster's allocation defaults, see
-[scripts/common/README.md](../scripts/common/README.md) and
 [multinode-running.md](multinode-running.md).
 
 With `sbatch` directly:

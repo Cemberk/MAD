@@ -14,7 +14,7 @@ MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD 
 
 > **On MI300X (gfx942)?** All four models above carry `skip_gpu_arch: gfx942` —
 > the ~1.5 TB checkpoint does not fit a single 8-GPU MI300X node, so K3 needs
-> multi-node sharding there. See [`mi300x/`](mi300x/README.md) for the 2-node
+> multi-node sharding there. See [docs/kimi-k3.md](../../docs/kimi-k3.md) for the 2-node
 > colocated and 4-node prefill/decode-disaggregated recipes.
 
 ## Hardware requirements
