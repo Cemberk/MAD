@@ -67,6 +67,8 @@ exit 0
 EOF
 printf '#!/bin/bash\n[ "$1" = -I ] && echo 10.0.0.1 || echo node\n' > "$B/hostname"
 printf '#!/bin/bash\necho "fuser $*" >> "$STUB_LOG"\n' > "$B/fuser"
+# `scontrol show hostnames LIST`, for a launcher that expands the nodelist with it.
+printf '#!/bin/bash\n[ "$1 $2" = "show hostnames" ] && tr , "\\n" <<<"$3"\n' > "$B/scontrol"
 chmod +x "$B"/*
 
 _colo() { # [VAR=value ...] -> runs the launcher; prints its exit status; stand-in log in $TMP/run/stub.log
