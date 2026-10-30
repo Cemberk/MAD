@@ -4,8 +4,9 @@ sbatch      : the batch script is submitted directly, and runs run_multinode.slu
 madengine   : madengine slurm_multi generates madengine_<name>.sh, which runs the same script
 
 Runs died because the madengine half could not even write its script when the card
-name was namespaced. This drives the real generator against the real
-card, so a regression on either side shows up without a cluster.
+name was namespaced. This runs madengine's own generator, SlurmDeployment.prepare(),
+on the real card and checks the script it writes, so a regression on either side
+shows up without a cluster.
 
 Needs madengine importable: installed, or a checkout's src/ in MADENGINE_SRC.
 Usage: python3 scripts/common/verify_both_paths_generate.py   (from any directory)
@@ -20,41 +21,52 @@ CARD_DIR = f"{MAD}/scripts/vllm_multinode"
 cards = {c["name"]: c for c in json.load(open(f"{CARD_DIR}/models.json"))}
 card = cards["pyt_vllm_kimi-k3_mi300x_pp2xtp8"]
 
-# Namespaced exactly as madengine's discovery names a nested card -- the shape that broke runs.
+# Named and pathed exactly as madengine's discovery gives a nested card
+# (utils/discover_models.py): the name is namespaced -- the shape that broke runs --
+# and the script path is relative to the MAD root.
 NS = "vllm_multinode/pyt_vllm_kimi-k3_mi300x_pp2xtp8"
 model = dict(card); model["name"] = NS
+model["scripts"] = os.path.normpath(os.path.join("scripts", "vllm_multinode", card["scripts"]))
 
+from madengine.deployment.base import DeploymentConfig
 from madengine.deployment.slurm import SlurmDeployment
 
+# madengine resolves the card's script against the manifest's directory, which is the
+# MAD root when madengine runs. A temporary root whose scripts/ is this checkout's
+# stands in for it, so nothing is written into the repository.
 work = tempfile.mkdtemp()
-manifest = {"built_models": {NS: model}, "built_images": {}, "context": {},
-            "deployment_config": {"target": "slurm",
-                                  "slurm": {"partition": "<partition>", "nodes": 2,
-                                            "gpus_per_node": 8, "time": "04:00:00",
-                                            "output_dir": f"{work}/slurm_results"},
-                                  "distributed": {"launcher": "slurm_multi", "nnodes": 2}}}
-mpath = Path(work) / "manifest.json"
+os.symlink(f"{MAD}/scripts", f"{work}/scripts")
+out = Path(work) / "slurm_results"
+deployment_config = {"target": "slurm",
+                     "slurm": {"partition": "<partition>", "nodes": 2,
+                               "gpus_per_node": 8, "time": "04:00:00",
+                               "output_dir": str(out)},
+                     "distributed": {"launcher": "slurm_multi", "nnodes": 2}}
+manifest = {"built_models": {NS: model}, "built_images": {NS: {"docker_image": "<image>"}},
+            "context": {}, "deployment_config": deployment_config}
+mpath = Path(work) / "build_manifest.json"
 mpath.write_text(json.dumps(manifest))
 
-dep = SlurmDeployment.__new__(SlurmDeployment)
-print("1. filename from the namespaced card name")
-safe = dep._safe_name(model)
+print("1. madengine generates the job script for the namespaced card")
+dep = SlurmDeployment(DeploymentConfig(target="slurm", manifest_file=str(mpath),
+                                       additional_context=deployment_config))
+ok_prep = dep.prepare() is True
+target = Path(dep.script_path) if dep.script_path else None
+print(f"     prepare(): {ok_prep}")
 print(f"     name  : {NS}")
-print(f"     file  : madengine_{safe}.sh")
-ok1 = "/" not in safe
-print(f"     one path segment: {ok1}")
+print(f"     file  : {target.name if target else None}")
+ok1 = ok_prep and target is not None and target.is_file() and target.parent == out
+print(f"     written directly under slurm_results: {ok1}")
 
-print("\n2. the path that used to fail with ENOENT now writes")
-out = Path(work) / "slurm_results"; out.mkdir(parents=True)
-target = out / f"madengine_{safe}.sh"
-target.write_text("#!/bin/bash\n")
-ok2 = target.is_file() and target.parent == out
-print(f"     wrote {target.name} directly under slurm_results: {ok2}")
+print("\n2. the generated script runs the card's launcher")
+generated = target.read_text() if ok1 else ""
+ok2 = "run_multinode.slurm" in generated
+print(f"     references run_multinode.slurm: {ok2}")
 
 print("\n3. both paths name the SAME launcher script")
-standalone_script = card["scripts"]                     # what plain sbatch submits
-madengine_script = model["scripts"]                     # what slurm_multi runs
-ok3 = standalone_script == madengine_script == "run_multinode.slurm"
+standalone_script = os.path.normpath(f"{CARD_DIR}/{card['scripts']}")   # what plain sbatch submits
+madengine_script = os.path.normpath(f"{MAD}/{model['scripts']}")        # what slurm_multi runs
+ok3 = standalone_script == madengine_script == os.path.normpath(f"{CARD_DIR}/run_multinode.slurm")
 print(f"     sbatch     -> {standalone_script}")
 print(f"     madengine  -> {madengine_script}")
 print(f"     same launcher: {ok3}")
