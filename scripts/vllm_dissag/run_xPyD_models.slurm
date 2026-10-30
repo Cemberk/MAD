@@ -788,6 +788,7 @@ docker run --rm \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
+        set -o pipefail
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     " &
@@ -797,29 +798,17 @@ _docker_rc=$?
 trap - TERM INT
 exit "$_docker_rc"
 '
+_srun_rc=$?
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
 
-# Publish the perf CSV where madengine collects it. benchmark_xPyD.sh /
-# benchmark_niah.sh write /run_logs/$SLURM_JOB_ID/perf.csv inside the container
-# (= $LOG_PATH on the host), but madengine resolves a model's `multiple_results`
-# against the JOB DIRECTORY it launched us from - so copy it there under the
-# declared name. Harmless for entries that do not declare multiple_results.
-_PERF_SRC="${LOG_PATH}/${SLURM_JOB_ID}/perf.csv"
-_PERF_DST="$(pwd)/perf_${MODEL_NAME}.csv"
-if [ -f "$_PERF_SRC" ]; then
-    cp "$_PERF_SRC" "$_PERF_DST"
-    echo "perf CSV -> ${_PERF_DST} ($(( $(wc -l < "$_PERF_DST") - 1 )) rows)"
-    _failed="$(cluster_perf_failures "$_PERF_SRC" || true)"
-    if [ "${_failed:-0}" -gt 0 ] 2>/dev/null; then
-        echo "ERROR: ${_failed} row(s) of $_PERF_SRC are FAILURE; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
-        exit 1
-    fi
-else
-    # Exit non-zero: a run with no parseable results is a failure. Reporting it
-    # as success makes madengine record exit_code=0 and collect "0 successful,
-    # 0 failed", which is indistinguishable from a clean run. See the longer
-    # note in scripts/vllm_multinode/run_multinode.slurm.
-    echo "ERROR: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
-    exit 1
-fi
+# The job's verdict (cluster_job_verdict, cluster.sh). benchmark_xPyD.sh / benchmark_niah.sh
+# write /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host), but
+# madengine resolves a model's `multiple_results` against the JOB DIRECTORY it launched us
+# from, so the CSV is published there under the declared name first. Then the job fails when a
+# node's container exited non-zero, when there are no parseable results (madengine would
+# otherwise record exit_code=0 and "0 successful, 0 failed", the same as a clean run), or when
+# any row is FAILURE. The container's exit status used to be dropped here: the run script's
+# output is piped through tee, and nothing read the srun status, so a node whose server died
+# still ended the job COMPLETED when an earlier cell had written a CSV.
+cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" || exit $?
 

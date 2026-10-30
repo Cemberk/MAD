@@ -107,6 +107,36 @@ rows = csv.DictReader(open(sys.argv[1], newline=""))
 print(sum(1 for r in rows if (r.get("status") or "").strip().upper() == "FAILURE"))
 PY
 }
+# The job's verdict, the same in every launcher:
+#   cluster_job_verdict <srun_rc> <perf_src> <perf_dst> [require_csv=1]
+# Publishes perf_src at perf_dst first -- madengine resolves a card's
+# multiple_results against the directory it launched the job from, and it collects
+# the cells that passed even from a job that failed -- then fails (returns
+# non-zero) when a node's container exited non-zero, when there are no results
+# (unless require_csv=0, a run that serves without benchmarking), or when any row
+# is FAILURE. A launcher ends with `cluster_job_verdict ... || exit $?`.
+cluster_job_verdict() {
+    local rc="$1" src="$2" dst="$3" require="${4:-1}" logs failed
+    logs="$(dirname "$src")"
+    if [ -f "$src" ]; then
+        cp "$src" "$dst" && echo "perf CSV -> ${dst} ($(( $(wc -l < "$dst") - 1 )) rows)"
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "ERROR: a node's container exited with status ${rc}; see the per-node logs under ${logs}." >&2
+        return "$rc"
+    fi
+    if [ ! -f "$src" ]; then
+        [ "$require" = 1 ] || return 0
+        echo "ERROR: no perf CSV at ${src}; the benchmark produced no parseable results." >&2
+        return 1
+    fi
+    failed="$(cluster_perf_failures "$src" || true)"
+    if [ "${failed:-0}" -gt 0 ] 2>/dev/null; then
+        echo "ERROR: ${failed} row(s) of ${src} are FAILURE; see the per-node logs under ${logs}." >&2
+        return 1
+    fi
+    return 0
+}
 # --------------------------------------------------------------- topology
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 export NNODES="${NNODES:-${SLURM_NNODES:-1}}"
