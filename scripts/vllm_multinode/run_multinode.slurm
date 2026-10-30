@@ -92,6 +92,11 @@ MODEL_NAME="${MODEL_NAME:?set MODEL_NAME (key into scripts/vllm_dissag/models.ya
 #
 # It leaves MODEL_PATH empty unless someone set it: the NVMe-vs-NFS choice needs
 # the node list, which is not known until node discovery below.
+# Fabric settings the caller passed (card env_vars, madengine, sbatch --export), recorded
+# BEFORE cluster.sh fills in its fallbacks. See COLOCATED_ENV_ARGS.
+_FABRIC_VARS="NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_NET_GDR_LEVEL NCCL_CROSS_NIC NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAME RCCL_AINIC_ROCE RDMAV_DRIVERS MORI_RDMA_DEVICES MORI_SOCKET_IFNAME MORI_IB_GID_INDEX"
+_FABRIC_PASSED=""
+for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 USER_NAME="${USER:-$(id -un)}"
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER_NAME}/model_blog_logs}"
@@ -189,6 +194,68 @@ export MAD_SCRIPTS_MOUNT=/mad_scripts
 export COLOCATED_FORWARD_ENV
 for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; done
 
+# Container env this launcher passes, by the same rules as the SGLang disagg launcher:
+#   - every fabric setting the caller passed (rails, GID index, socket interfaces), on
+#     any cluster. Without them NCCL and Gloo in the container pick their own
+#     interfaces for the cross-node PP traffic, whatever the run asked for;
+#   - on ainic / thor2, also what cluster.sh derived for the fabric. On cx7 / unknown,
+#     cluster.sh-only values (one cluster's fallbacks) are not forwarded, so those runs
+#     keep the autodetection they ran with;
+#   - with a MoRI all2all backend, the MoRI platform env from
+#     scripts/vllm_dissag/connectors/moriio.env (expandable_segments:False on both
+#     allocators, HSA_ENABLE_IPC_MODE_LEGACY=0, the RDMA tuning), which PyTorch and
+#     MoRI read at start-up. A value exported at submit time wins over the file, and
+#     MORI_GPU_ARCHS follows the detected GPU unless it was set (the file pins gfx942).
+COLOCATED_ENV_ARGS=""
+case "${ALL2ALL_BACKEND}" in
+    mori*)
+        _MORI_ENV_FILE="${SHARED_DIR}/connectors/moriio.env"
+        echo "Loading MoRI platform env: ${_MORI_ENV_FILE}"
+        while IFS= read -r _line; do
+            [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
+            _k="${_line%%=*}"; _v="${_line#*=}"
+            [ "$_k" = MORI_GPU_ARCHS ] && [ -z "${MORI_GPU_ARCHS:-}" ] && [ -n "${MAD_GPU_ARCH:-}" ] && _v="$MAD_GPU_ARCH"
+            COLOCATED_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"
+        done < "$_MORI_ENV_FILE"
+        ;;
+esac
+_FABRIC_FWD="$_FABRIC_PASSED"
+case "${CLUSTER_ARCHETYPE:-}" in ainic|thor2) _FABRIC_FWD="$_FABRIC_VARS" ;; esac
+for _v in $_FABRIC_FWD; do
+    case " $COLOCATED_ENV_ARGS " in *" -e ${_v}="*) continue ;; esac
+    [ -n "${!_v:-}" ] && COLOCATED_ENV_ARGS+=" -e ${_v}=${!_v}"
+done
+export COLOCATED_ENV_ARGS
+echo "[env] to the container:${COLOCATED_ENV_ARGS:- none}"
+
+# The container barrier port (serve_colocated.sh). One per job, not a fixed 2223: the
+# launcher used to free 2223 with `fuser -k`, which on a node shared with another job
+# killed whatever that job had listening there. Below MASTER_PORT (29500).
+export CONTAINER_BARRIER_PORT="${CONTAINER_BARRIER_PORT:-$(( 20000 + ${SLURM_JOB_ID:-0} % 9000 ))}"
+
+# Tear the containers down however the job ends, installed BEFORE the blocking srun.
+#
+# `docker run` here is attached, not detached, but the container belongs to the
+# docker daemon rather than to this job: scancel kills this script and the srun
+# under it, and the container carries on holding its GPU memory. The node then
+# looks occupied to the next job with no SLURM job on it to explain why, which is
+# what the next job hit --
+#     RuntimeError: The memory capacity is unbalanced.
+#                   Some GPUs may be occupied by other processes.
+# -- after the earlier job had been cancelled at the 4 hour wall clock.
+#
+# The trap used to be installed after the srun returned, so a cancel during the run
+# -- the case it exists for -- never reached it. srun runs in the background and the
+# script waits on it, so a TERM is handled as soon as it lands rather than when srun
+# exits. Idempotent, so the explicit call after the run and the traps can all fire.
+_colocated_teardown() {
+    srun --nodelist="$SELECTED_NODELIST" bash -c \
+        'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true' \
+        2>/dev/null || true
+}
+trap _colocated_teardown EXIT
+trap 'trap - EXIT; _colocated_teardown; exit 143' INT TERM
+
 # Two rules for the srun body below, both learned the hard way, both invisible to
 # bash -n:
 #
@@ -212,8 +279,6 @@ for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; do
 srun --nodelist="$SELECTED_NODELIST" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)"
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true
-fuser -k 2223/tcp 2>/dev/null || true
-sleep 2
 docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true
 
 # Host RDMA userspace libs must match the host kernel driver; mount them over the
@@ -368,6 +433,8 @@ docker run --rm \
     -e TP_SIZE=$TP_SIZE \
     -e PP_SIZE=$PP_SIZE \
     -e ENABLE_EP=$ENABLE_EP \
+    -e CONTAINER_BARRIER_PORT=$CONTAINER_BARRIER_PORT \
+    ${COLOCATED_ENV_ARGS} \
     ${ALL2ALL_BACKEND:+-e ALL2ALL_BACKEND=$ALL2ALL_BACKEND} \
     ${COLOCATED_EXTRA_ARGS:+-e COLOCATED_EXTRA_ARGS="$COLOCATED_EXTRA_ARGS"} \
     -e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE \
@@ -385,61 +452,35 @@ docker run --rm \
     ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
+        set -o pipefail
         mkdir -p /run_logs/${SLURM_JOB_ID}
         SHARED_DIR=$MAD_SCRIPTS_MOUNT/vllm_dissag \
         bash $MAD_SCRIPTS_MOUNT/vllm_multinode/serve_colocated.sh \
           2>&1 | tee /run_logs/${SLURM_JOB_ID}/colocated_bench_NODE${SLURM_PROCID}.log
     "
+_docker_rc=$?
 rm -f "$_ENV_FILE"
-'
-
-# Run the teardown on EXIT as well, not only on the happy path.
-#
-# `docker run` here is attached, not detached, but the container belongs to the
-# docker daemon rather than to this job: scancel kills this script and the srun
-# under it, and the container carries on holding its GPU memory. The node then
-# looks occupied to the next job with no SLURM job on it to explain why, which is
-# what the next job hit --
-#     RuntimeError: The memory capacity is unbalanced.
-#                   Some GPUs may be occupied by other processes.
-# -- after the earlier job had been cancelled at the 4 hour wall clock.
-#
-# So every run that ends early now cleans up after itself instead of leaving the
-# mess for whoever allocates the node next. Idempotent, so the explicit call below
-# and the trap can both fire.
-_colocated_teardown() {
-    srun --nodelist="$SELECTED_NODELIST" bash -c \
-        'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true' \
-        2>/dev/null || true
-}
-trap _colocated_teardown EXIT INT TERM
+exit "$_docker_rc"
+' &
+_srun_pid=$!
+_srun_rc=0
+wait "$_srun_pid" || _srun_rc=$?
 
 _colocated_teardown
 
-# Publish the perf CSV where madengine collects it. The benchmark writes
-# /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host),
-# but madengine resolves a model's `multiple_results` against the JOB DIRECTORY it
-# launched us from - so copy it there under the declared name.
-_PERF_SRC="${LOG_PATH}/${SLURM_JOB_ID}/perf.csv"
-_PERF_DST="$(pwd)/perf_${MODEL_NAME}.csv"
-if [ -f "$_PERF_SRC" ]; then
-    cp "$_PERF_SRC" "$_PERF_DST"
-    echo "perf CSV -> ${_PERF_DST} ($(( $(wc -l < "$_PERF_DST") - 1 )) rows)"
-    _failed="$(cluster_perf_failures "$_PERF_SRC" || true)"
-    if [ "${_failed:-0}" -gt 0 ] 2>/dev/null; then
-        echo "ERROR: ${_failed} row(s) of $_PERF_SRC are FAILURE; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
-        exit 1
-    fi
-else
-    # Exit non-zero. A run that produced no parseable results is a failure, and
-    # reporting it as success is the worst outcome for a benchmark: madengine
-    # records exit_code=0 in its completion marker and the collector reports
-    # "0 successful, 0 failed", so a hard engine crash is indistinguishable from
-    # a clean run. Observed with the gfx942 MoE LLVM abort, which died in
-    # determine_available_memory and still exited 0.
-    echo "ERROR: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
+# The job's verdict (cluster_job_verdict, cluster.sh). The benchmark writes
+# /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host), but
+# madengine resolves a model's `multiple_results` against the JOB DIRECTORY it launched
+# us from, so the CSV is published there under the declared name first. Then the job
+# fails when a node's container exited non-zero, when there are no parseable results,
+# or when any row is FAILURE. A run with no results must not pass: madengine would
+# record exit_code=0 and collect "0 successful, 0 failed", so a hard engine crash
+# (seen with the gfx942 MoE LLVM abort, which died in determine_available_memory and
+# still exited 0) would read as a clean run.
+cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" || {
+    _rc=$?
     echo "Colocated multi-node run FAILED. Logs: ${LOG_PATH}/${SLURM_JOB_ID}" >&2
-    exit 1
-fi
+    exit "$_rc"
+}
 
 echo "Colocated multi-node run complete. Logs: ${LOG_PATH}/${SLURM_JOB_ID}"

@@ -465,6 +465,21 @@ Other fabric variables:
 `cluster_report_rdma_rails` prints the rails a job will use and warns about any that is absent or
 not `ACTIVE`. It changes nothing; it makes a wrong rail list visible in the log.
 
+How these reach the containers: the vLLM disaggregated launcher passes the fabric variables with
+`-e`. The colocated launcher forwards every fabric variable the caller passed, and on `ainic` /
+`thor2` also what `cluster.sh` derived; on `cx7` / `unknown` it forwards only what was passed, so
+NCCL keeps the autodetection it ran with. It prints what it forwarded on its `[env]` line. With a
+MoRI all2all backend (`ALL2ALL_BACKEND=mori*`) it also forwards `connectors/moriio.env`, as the
+disaggregated launcher does. Any other name goes through `COLOCATED_FORWARD_ENV`.
+
+### Storage the containers see
+
+The launchers bind `SHARED_MOUNT`, `NVME_ROOT` and `MODEL_DIR` into every container at the same
+path, each only if it exists on the node (Docker would turn a missing bind source into an empty
+directory that shadows it), and `MODEL_DIR` only when it is outside the other two. Their
+`[mounts]` line shows what was bound. A site whose storage is elsewhere sets these two names; the
+`LOG_PATH` and JIT-cache defaults follow them.
+
 ### Ports, timeouts, container
 
 | Variable | Default |
