@@ -7,7 +7,7 @@
 #   NIAH_URL     endpoint (default http://127.0.0.1:30000/v1/chat/completions)
 #   NIAH_MODEL   model name/tag the server serves (required — the served path)
 #   NIAH_WORDS   comma list of context sizes in words (default 2000,8000,20000,35000)
-#   NIAH_MAXTOK  max_tokens for the answer (default 2048)
+#   NIAH_MAXTOK  max_tokens for the answer (default 8192)
 #   NIAH_SEEDS   comma list of needle-layout seeds (default 0,1,2); summary reports
 #                mean/min/max across seeds to separate real accuracy from variance
 #   NIAH_TIMEOUT per-request timeout seconds (default 1800)

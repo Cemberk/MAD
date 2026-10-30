@@ -195,7 +195,7 @@ absorbs a late router).
 |---|---|---|
 | `NIAH_WORDS` | `2000,8000,20000,35000` | Context sizes in words, comma-separated. The Kimi-K3 cards use `10000,50000,100000,200000`. |
 | `NIAH_SEEDS` | `0,1,2` | Needle-layout seeds. The summary reports mean, min and max across seeds, to separate real accuracy from single-needle variance. |
-| `NIAH_MAXTOK` | `2048` | `max_tokens` for the answer. Raise it for reasoning models. Standalone `benchmark_niah.py` defaults to `8192`. |
+| `NIAH_MAXTOK` | `8192` | `max_tokens` for the answer, room for a reasoning model's trace. |
 | `NIAH_TIMEOUT` | `1800` | Per-request timeout in seconds. |
 | `NIAH_WARMUP` | `1` | `0` disables the warmup pass. |
 | `NIAH_MODEL` | see above | Model name to request. |
