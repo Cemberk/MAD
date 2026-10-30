@@ -955,7 +955,7 @@ Both launchers accept `BENCHMARK_SCRIPT`:
 | `niah` (the Kimi cards' setting) | `benchmark_niah.sh` | Retrieval accuracy, needles found out of 10 per context size |
 
 NIAH knobs, with the script defaults: `NIAH_WORDS` (`2000,8000,20000,35000`), `NIAH_SEEDS`
-(`0,1,2`), `NIAH_MAXTOK` (`2048`), `NIAH_TIMEOUT` (`1800`), `NIAH_WARMUP` (`1`: first-hit JIT
+(`0,1,2`), `NIAH_MAXTOK` (`8192`), `NIAH_TIMEOUT` (`1800`), `NIAH_WARMUP` (`1`: first-hit JIT
 compiles run off the scored path). `NIAH_MODEL` defaults to `SERVED_MODEL_NAME`.
 
 All three land in madengine's `perf.csv` through `parse_to_csv.py`, so the NIAH numbers are a
