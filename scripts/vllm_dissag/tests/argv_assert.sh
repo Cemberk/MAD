@@ -525,8 +525,12 @@ PY
 )"
   _has "$_bad" "none" "$(basename "$(dirname "$_cat")")/models.json: every card declares multiple_results=perf_<MODEL_NAME>.csv"
 done
-_has "$(cat "$DIR/run_xPyD_models.slurm")" '_PERF_DST="$(pwd)/perf_${MODEL_NAME}.csv"' "vllm_dissag launcher publishes perf_<MODEL_NAME>.csv"
-_has "$(cat "$DIR/../sglang_disagg/run_xPyD_models.slurm")" '"$(pwd)/perf_${MODEL_NAME}.csv"' "sglang_disagg launcher publishes perf_<MODEL_NAME>.csv"
+# Each launcher publishes through cluster_job_verdict (cluster.sh); its behaviour is
+# checked in common/tests/launcher_verdict_assert.sh.
+for _l in run_xPyD_models.slurm ../sglang_disagg/run_xPyD_models.slurm ../vllm_multinode/run_multinode.slurm; do
+  _has "$(cat "$DIR/$_l")" 'cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv"' \
+      "$(basename "$(dirname "$DIR/$_l")") launcher publishes perf_<MODEL_NAME>.csv"
+done
 
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"

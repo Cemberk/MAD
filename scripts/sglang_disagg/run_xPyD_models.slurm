@@ -606,26 +606,10 @@ srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME
 # results still ended COMPLETED, and madengine collected "0 successful, 0 failed" as a pass.
 # A node's container exits non-zero when its server or benchmark fails (passing runs exit 0 on
 # every node), and a benchmark that ran writes /run_logs/$SLURM_JOB_ID/perf.csv (= $LOG_PATH on
-# the host). SKIP_BENCHMARK=1 serves without benchmarking, so it has no results to require.
-if [ "$_srun_rc" -ne 0 ]; then
-    echo "ERROR: a node's container exited with status ${_srun_rc}; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
-    exit "$_srun_rc"
-fi
-if [ "${SKIP_BENCHMARK}" != "1" ] && [ ! -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" ]; then
-    echo "ERROR: no perf CSV at ${LOG_PATH}/${SLURM_JOB_ID}/perf.csv; the benchmark produced no parseable results." >&2
-    exit 1
-fi
-if [ -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" ]; then
-    # Publish it where madengine collects it: a card's `multiple_results` is resolved
-    # against the job directory madengine launched us from (this script's working
-    # directory), not $LOG_PATH. Without it a multi-node run records no result at all.
-    # Same name as the vLLM launchers: perf_<MODEL_NAME>.csv.
-    cp "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" \
-        && echo "perf CSV -> $(pwd)/perf_${MODEL_NAME}.csv"
-    _failed="$(cluster_perf_failures "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" || true)"
-    if [ "${_failed:-0}" -gt 0 ] 2>/dev/null; then
-        echo "ERROR: ${_failed} row(s) of ${LOG_PATH}/${SLURM_JOB_ID}/perf.csv are FAILURE; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
-        exit 1
-    fi
-fi
+# the host). The CSV is published before any failure is reported, so the cells that passed
+# still reach madengine. SKIP_BENCHMARK=1 serves without benchmarking, so it has no results
+# to require. Same verdict as the vLLM launchers (cluster_job_verdict, cluster.sh).
+_require_csv=1
+[ "${SKIP_BENCHMARK}" = "1" ] && _require_csv=0
+cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" "$_require_csv" || exit $?
 
