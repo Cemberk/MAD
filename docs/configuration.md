@@ -431,7 +431,7 @@ holding a different variant, is a hard failure with a message saying what to fix
 | `NNODES` | `${SLURM_NNODES:-1}` | |
 | `xP`, `yD` | `1`, `1` | Prefill and decode node counts |
 | `TP_SIZE` | `${GPUS_PER_NODE}` | For the colocated launcher. The vLLM wideEP path uses `EP_TP_SIZE` instead, so this default does not turn a TP1/DP16 recipe into TP8/DP2 |
-| `PP_SIZE` | `1` | |
+| `PP_SIZE` | unset | The colocated launcher defaults it to the node count; no other launcher reads it |
 
 ### Fabric
 

@@ -129,7 +129,9 @@ export NNODES="${NNODES:-${SLURM_NNODES:-1}}"
 export xP="${xP:-1}"
 export yD="${yD:-1}"
 export TP_SIZE="${TP_SIZE:-${GPUS_PER_NODE}}"
-export PP_SIZE="${PP_SIZE:-1}"
+# No PP_SIZE default here. Only the colocated launcher reads it, and its default is
+# the node count; exporting 1 from here made that default unreachable, so a plain
+# 2-node sbatch failed the TP*PP == GPUs check (8x1 != 16).
 
 # --------------------------------------------------------------- fabric
 # The values below were one cluster's, hardcoded. They are not portable: the
