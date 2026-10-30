@@ -765,7 +765,7 @@ throw on every request, so the fence never ran; that is fixed in the current ima
 fence and device sync are therefore off.
 
 **Why some `moriio.env` values are repeated here.** `connectors/moriio.env` is only sourced by
-`run_xPyD_models.slurm`. The interactive test path (`tests/drive_cell.sh`) does not source it, so
+`run_xPyD_models.slurm` (and by `run_multinode.slurm` with a MoRI all2all backend). The interactive test path (`tests/drive_cell.sh`) does not source it, so
 values that must also reach the container on that path are set in the recipe too. On the slurm path
 the forwarded `moriio.env` values are already set when the recipe is read, so they take precedence
 (see [configuration.md](configuration.md#per-model-env-layering-vllm-disaggregated)).

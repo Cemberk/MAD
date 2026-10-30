@@ -87,8 +87,9 @@ resource names and the run id, and the pods run byte-identical stand-ins. See
 
 **Colocated cards** (`vllm_multinode`) move data between nodes only with NCCL, which runs
 over the pod network on TCP when there is no RDMA. Set `NCCL_IB_DISABLE=1`,
-`NCCL_SOCKET_IFNAME=eth0` and `GLOO_SOCKET_IFNAME=eth0`, and forward them into the container
-with `COLOCATED_FORWARD_ENV`; see the [worked example](#worked-example-colocated-vllm-on-2-and-4-pods).
+`NCCL_SOCKET_IFNAME=eth0` and `GLOO_SOCKET_IFNAME=eth0`. The launcher forwards the two interface
+names itself; `NCCL_IB_DISABLE` goes through `COLOCATED_FORWARD_ENV`. See the
+[worked example](#worked-example-colocated-vllm-on-2-and-4-pods).
 
 **Disaggregated cards** move the KV cache between prefill and decode pods with MoRI,
 Mooncake or NIXL over RDMA, and need three more things. Kubernetes provides only the first:

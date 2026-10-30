@@ -476,7 +476,10 @@ How these reach the containers: the vLLM launchers pass the fabric variables wit
 SGLang launcher forwards every fabric variable the caller passed, and on `ainic` / `thor2` also
 what `cluster.sh` derived; on `cx7` it forwards only what was passed, so the container keeps the
 defaults it was tuned with (`mori_ep_env.sh`). It prints what it forwarded on its `[fabric]` line.
-The colocated launcher forwards the names listed in `COLOCATED_FORWARD_ENV`.
+The colocated launcher follows the SGLang rule (every fabric variable passed; on `ainic` / `thor2`
+also what `cluster.sh` derived) and prints what it forwarded on its `[env]` line. With a MoRI
+all2all backend (`ALL2ALL_BACKEND=mori*`) it also forwards `connectors/moriio.env`, as the vLLM
+disaggregated launcher does. Any other name goes through `COLOCATED_FORWARD_ENV`.
 
 ### Storage the containers see
 
