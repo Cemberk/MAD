@@ -210,6 +210,7 @@ Add an entry to `models.json`:
 | `timeout` | ❌ | Model-specific timeout override |
 | `multiple_results` | ❌ | CSV file for multiple results |
 | `args` | ❌ | Additional script arguments |
+| `image_spec` | ❌ | Declarative image instead of `dockerfile` (see below) |
 
 #### Step 3: Docker Setup
 
@@ -240,6 +241,44 @@ RUN URL=https://example.com/model-data.zip && \
 # Set working directory
 WORKDIR /workspace
 ```
+
+#### Alternative: Declarative `image_spec`
+
+A card can describe the stack it needs instead of pointing at its own
+Dockerfile. madengine resolves the spec against `compat/rocm.json` and
+`compat/cuda.json` and builds the shared `docker/global_univ2.ubuntu.amd.Dockerfile`
+or `docker/global_univ2.ubuntu.nvidia.Dockerfile` with the resolved build args.
+Cards with a `dockerfile` keep working unchanged.
+
+```json
+{
+  "name": "my_model",
+  "image_spec": {
+    "rocm": {"version": "10.1"},
+    "cuda": {"version": "12.8"},
+    "torch": "2.11",
+    "components": [
+      {"name": "migraphx", "amd": {"url": "https://.../migraphx.whl"}, "sha256": "..."}
+    ],
+    "sources": [{"repo": "https://github.com/ROCm/AMDMIGraphX", "commit": "<sha>"}]
+  },
+  "scripts": "run.sh",
+  "n_gpus": "1",
+  "tags": ["my_model"]
+}
+```
+
+- `madengine build --tags my_model --explain` prints the resolved plan without building.
+- `--additional-context '{"image_spec": {...}}'` overrides a card's spec for one run, and
+  `docker_build_arg` still overrides any resolved build arg.
+- `build_manifest.json` records the resolved plan (`build_plan`) and the installed
+  stack (`image_info`) for each image.
+- `compat/rocm.json` lists the ROCm releases a spec can name. `compat/cuda.json` is
+  generated from [replicate/cog](https://github.com/replicate/cog) (Apache-2.0); refresh it
+  with `python tools/sync_cuda_matrix_from_cog.py`.
+
+See `scripts/dummy/models.json` (`dummy_image_spec`) for a working card and the
+madengine configuration guide for every `image_spec` key.
 
 #### Step 4: Script Implementation
 
