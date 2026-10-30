@@ -217,6 +217,11 @@ RUN rm -rf /tmp/vllm-src && \
     python3 -c "import vllm; print('vLLM', vllm.__version__, 'from', vllm.__file__)" && \
     rm -rf /tmp/vllm-src
 
+# PyYAML on every build: both vLLM launchers read models.yaml with `import yaml` in the
+# container, vLLM is installed --no-deps above, and the WITH_NIXL=0 build skips the
+# transport step that also installs it.
+RUN pip install pyyaml && python3 -c "import yaml"
+
 # Cross-check MoRI + AITER survived the vLLM install (no silent downgrade).
 RUN python3 - <<'PYEOF'
 from importlib.metadata import version as v, PackageNotFoundError
